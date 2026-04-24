@@ -22,10 +22,8 @@ set.seed(42)
 # Orientation
 
 Chapter 5 (book pp. 187–202) asks a deceptively simple question: **how often
-are real-world data actually Normal?** The answer: less often than the textbook
-suggests. The book contains **one Python reference** in this chapter, quoted in
-§5.2 at p. 195 (see below). This companion simulates the mechanism that
-produces Normal data, builds a Quincunx (Galton board), shows how to test for
+are real-world data actually Normal?** This companion simulates the mechanism that
+produces Normal data, builds a Quincunx (Galton board), and shows how to test for
 Normality, and reproduces the chapter's examples of phony Normals (IQ) and
 mixed populations.
 
@@ -71,7 +69,7 @@ all.equal(gaussian(seq(-3, 3, 0.1)),
           dnorm(seq(-3, 3, 0.1)))
 ```
 
-## The Quincunx (Galton board)
+## The Quincunx (Galton's board)
 
 Each ball falls through 20 rows of pegs; at each peg it goes left or right with
 probability ½. Its final bin is determined by the sum of 20 independent ±1 steps.
@@ -85,7 +83,7 @@ final_position <- replicate(n_balls, sum(sample(c(-1, 1), n_rows, replace = TRUE
 tibble(position = final_position) |>
   ggplot(aes(position)) +
   geom_bar(fill = "steelblue") +
-  labs(title = "Galton board: position after 20 rows of ±1 steps",
+  labs(title = "Galton's board: position after 20 rows of ±1 steps",
        x = "Final bin", y = "Count")
 ```
 
@@ -132,8 +130,7 @@ tibble(x = data_x) |>
 
 ## Testing for Normality  *(book §5.2 "Testing whether a given distribution is Normal", p. 195)*
 
-The chapter mentions the **Shapiro-Wilk test** and **QQ plots**. The book's
-only Python reference in this chapter appears here:
+The chapter mentions the **Shapiro-Wilk test** and **QQ plots**. 
 
 > *"[...] the Python call for a QQ plot is `sm.qqplot(data, line='45')`, then use the Python call [...]"* — book p. 195
 
