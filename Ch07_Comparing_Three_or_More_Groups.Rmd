@@ -1,6 +1,6 @@
 ---
 title: "Chapter 7 — Comparing Three or More Groups (R companion)"
-subtitle: "R/tidyverse translation of *Understanding Data*"
+subtitle: "R/tidyverse translation of *Understanding Data by Alan Garfinkel & Yina Guo*"
 author: "Course notes"
 date: "`r Sys.Date()`"
 output:
@@ -26,7 +26,7 @@ carefully navigating the **multiple-testing trap** ("green jelly beans"). It
 introduces the **omnibus F-test** built by resampling, then BH-corrected
 post-hoc pairwise comparisons. The book contains explicit Python snippets
 in **§7.10** ("How does resampling compare to formula-based ANOVA", pp. 364–365),
-reproduced in-place below. We reproduce each piece explicitly.
+reproduced in-place below.
 
 # §7.1 — Data  *(book §7.1 "Visualizing the data and choosing the measures", p. 287)*
 
