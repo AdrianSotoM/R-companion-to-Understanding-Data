@@ -1,6 +1,6 @@
 ---
 title: "Chapter 8 — Independence, Proportions, and Relative Risk (R companion)"
-subtitle: "R/tidyverse translation of *Understanding Data*"
+subtitle: "R/tidyverse translation of *Understanding Data by Alan Garfinkel & Yina Guo*"
 author: "Course notes"
 date: "`r Sys.Date()`"
 output:
@@ -22,7 +22,7 @@ set.seed(42)
 
 Chapter 8 (book pp. 366–447) works with count data: are two proportions the same,
 are observations independent of group membership, what's the relative risk?
-The chapter's signature move is **simulation-based χ-square** — translated below
+The chapter's approach is **simulation-based χ-square** — translated below
 from the book's Python snippets at **p. 379**.
 
 # §8.1 — Observed vs expected histograms  *(book §8.1 "Comparing histograms of observations to expectations", p. 367)*
