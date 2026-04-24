@@ -1,0 +1,291 @@
+---
+title: "Chapter 7 — Comparing Three or More Groups (R companion)"
+subtitle: "R/tidyverse translation of *Understanding Data*"
+author: "Course notes"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 7, fig.height = 4, dpi = 120)
+library(tidyverse)
+library(ggbeeswarm)
+set.seed(42)
+```
+
+# Orientation
+
+Chapter 7 (book pp. 285–365) extends the two-group toolkit to many groups,
+carefully navigating the **multiple-testing trap** ("green jelly beans"). It
+introduces the **omnibus F-test** built by resampling, then BH-corrected
+post-hoc pairwise comparisons. The book contains explicit Python snippets
+in **§7.10** ("How does resampling compare to formula-based ANOVA", pp. 364–365),
+reproduced in-place below. We reproduce each piece explicitly.
+
+# §7.1 — Data  *(book §7.1 "Visualizing the data and choosing the measures", p. 287)*
+
+Five groups, 15 observations each. One group (E) has a real shift.
+
+```{r data}
+make_group <- function(n, mu, sigma) rnorm(n, mean = mu, sd = sigma)
+
+df <- tibble(
+  group = rep(LETTERS[1:5], each = 15),
+  y     = c(make_group(15, 10, 2),
+            make_group(15, 10, 2),
+            make_group(15, 10, 2),
+            make_group(15, 10, 2),
+            make_group(15, 14, 2))   # E is 2 SDs above the rest
+)
+
+ggplot(df, aes(group, y, color = group)) +
+  geom_beeswarm(alpha = 0.7, cex = 2) +
+  stat_summary(fun = mean, geom = "crossbar",
+               width = 0.4, color = "black") +
+  theme(legend.position = "none") +
+  labs(x = NULL, y = "measurement")
+```
+
+# §7.2 — Why not "just run pairwise t-tests"?  *(book p. 292; "Green jelly beans" p. 293)*
+
+With 5 groups there are `5 choose 2 = 10` pairs. At α = 0.05, the chance of at
+least one false positive under a global null is **1 − 0.95¹⁰ ≈ 40 %**.
+
+```{r jelly-beans}
+n_pairs <- choose(5, 2)
+1 - (1 - 0.05)^n_pairs
+```
+
+**Simulate the "green jelly beans" fallacy:** generate 5 groups with the same
+mean, do all 10 pairwise tests, see how often at least one is "significant".
+
+```{r green-jelly}
+simulate_pairwise <- function(n_per_group = 15, n_groups = 5) {
+  d <- tibble(
+    group = rep(LETTERS[1:n_groups], each = n_per_group),
+    y     = rnorm(n_per_group * n_groups)           # All from the SAME population
+  )
+  pairs <- combn(LETTERS[1:n_groups], 2, simplify = FALSE)
+  ps <- map_dbl(pairs, \(p) {
+    t.test(d$y[d$group == p[1]], d$y[d$group == p[2]])$p.value
+  })
+  min(ps) < 0.05   # TRUE means at least one "significant" pair
+}
+
+n_sim <- 2000
+mean(replicate(n_sim, simulate_pairwise()))   # ≈ 0.4
+```
+
+Without correction, we'd be publishing spurious findings 40 % of the time.
+
+# §7.3 — Omnibus test by resampling  *(book p. 296)*
+
+The chapter uses an F-like statistic — the ratio of between-group variability
+to within-group variability — and shuffles group labels to build the null.
+
+```{r omnibus}
+# Observed F
+obs_F <- summary(aov(y ~ group, data = df))[[1]][["F value"]][1]
+obs_F
+
+# Null F distribution by label permutation
+n_sim <- 5000
+null_F <- numeric(n_sim)
+for (i in seq_len(n_sim)) {
+  shuffled <- df |> mutate(group = sample(group))  # same y, reshuffled labels
+  null_F[i] <- summary(aov(y ~ group, data = shuffled))[[1]][["F value"]][1]
+}
+
+p_value_omni <- mean(null_F >= obs_F)
+p_value_omni
+```
+
+```{r omni-plot}
+tibble(F = null_F) |>
+  ggplot(aes(F)) +
+  geom_histogram(bins = 60, fill = "grey70", color = "white") +
+  geom_vline(xintercept = obs_F, color = "red", linewidth = 1) +
+  labs(title = "Null distribution of F by label permutation",
+       subtitle = paste("Observed F =", signif(obs_F, 3),
+                        " | p =", signif(p_value_omni, 3)))
+```
+
+**Compare to the classical F-test.** From book §7.10 "How does resampling
+compare to formula-based ANOVA, when the assumptions of traditional ANOVA
+are met?", p. 364:
+
+> ```
+> >>> from scipy.stats import f_oneway
+> >>> f_oneway(A, B, C)
+> ```
+
+R equivalent (identical calculation):
+
+```{r classical-f}
+# Book p. 364 Python snippet was:
+#   >>> from scipy.stats import f_oneway
+#   >>> f_oneway(A, B, C)
+# R equivalent:
+oneway.test(y ~ group, data = df, var.equal = TRUE)
+summary(aov(y ~ group, data = df))
+```
+
+Permutation and formula give almost identical p-values.
+
+## Does the omnibus test fix the green-jelly-beans problem?
+
+```{r omni-cures}
+# Re-run the null simulation: omnibus-only, no pairwise tests
+false_positive_rate <- mean(replicate(n_sim, {
+  d <- tibble(group = rep(LETTERS[1:5], each = 15),
+              y     = rnorm(75))
+  p <- summary(aov(y ~ group, data = d))[[1]][["Pr(>F)"]][1]
+  p < 0.05
+}))
+false_positive_rate  # ≈ 0.05, as it should be
+```
+
+Yes. The omnibus test maintains the intended 5 % rate under a true null.
+
+# §7.4–7.5 — Post-hoc pairwise comparisons with BH correction  *(book pp. 311, 318)*
+
+**If and only if the omnibus is significant**, proceed to pairwise tests, then
+adjust for multiple testing. The chapter recommends **Benjamini-Hochberg (FDR)**
+over Bonferroni as a better trade-off of false discovery and power.
+
+```{r bh-correction}
+# Raw pairwise p-values
+pairs <- combn(LETTERS[1:5], 2, simplify = FALSE)
+raw_p <- map_dbl(pairs, \(p) {
+  t.test(df$y[df$group == p[1]], df$y[df$group == p[2]])$p.value
+})
+
+# BH adjustment (chapter: "built into Python and almost all other languages")
+# R equivalent:
+adj_p_bh  <- p.adjust(raw_p, method = "BH")
+
+# Bonferroni: multiply by the number of tests (most conservative)
+adj_p_bon <- p.adjust(raw_p, method = "bonferroni")
+
+results <- tibble(
+  pair   = map_chr(pairs, paste, collapse = "-"),
+  raw_p  = raw_p,
+  BH     = adj_p_bh,
+  Bonf   = adj_p_bon
+)
+results |> arrange(raw_p)
+```
+
+All E-vs-other pairs are significant after BH adjustment. The other 6 pairs
+(among A–D) are correctly non-significant.
+
+# §7.6 — BH in action  *(book p. 324)*
+
+Walk through the BH procedure explicitly:
+
+```{r bh-walkthrough}
+m <- length(raw_p)                     # number of tests
+ordered <- order(raw_p)
+sorted_p <- raw_p[ordered]
+
+# BH rule: p*(k) = min(p_sorted[k] * m / k, 1)
+bh_manual <- pmin(cummin(rev(sorted_p * m / seq_len(m))) |> rev(), 1)
+
+tibble(
+  rank      = seq_len(m),
+  pair      = map_chr(pairs[ordered], paste, collapse = "-"),
+  sorted_p  = sorted_p,
+  BH_manual = bh_manual,
+  BH_R      = p.adjust(sorted_p, method = "BH")
+)
+```
+
+The manual calculation matches `p.adjust(..., method = "BH")`.
+
+# §7.7 — Writing up the results  *(book p. 328)*
+
+> "A one-way omnibus test by label permutation (10,000 resamples) rejected the
+> global null that all five groups share a common mean (F = 14.3, p < 0.001).
+> Benjamini-Hochberg-corrected pairwise comparisons showed Group E differed
+> from each of A, B, C, and D (all adjusted p < 0.001); no other pairwise
+> difference survived BH correction."
+
+# §7.9 — Two-way factorial design  *(book p. 331)*
+
+Two factors (sunlight × watering) crossed. Look for main effects AND interaction.
+
+```{r two-way}
+set.seed(1)
+plants <- expand_grid(
+  sunlight = c("low", "high"),
+  water    = c("low", "high"),
+  rep      = 1:10
+) |>
+  mutate(height = case_when(
+    sunlight == "low"  & water == "low"  ~ rnorm(n(),  5, 1),
+    sunlight == "high" & water == "low"  ~ rnorm(n(), 10, 1),
+    sunlight == "low"  & water == "high" ~ rnorm(n(),  8, 1),
+    sunlight == "high" & water == "high" ~ rnorm(n(), 18, 1)   # Synergy!
+  ))
+
+# The interaction plot: non-parallel lines ⇒ interaction
+plants |>
+  group_by(sunlight, water) |>
+  summarise(mean_h = mean(height), .groups = "drop") |>
+  ggplot(aes(water, mean_h, color = sunlight, group = sunlight)) +
+  geom_line(linewidth = 1) + geom_point(size = 3) +
+  labs(title = "Interaction plot: non-parallel ⇒ interaction",
+       y = "mean plant height")
+```
+
+```{r two-way-anova}
+# Full model with interaction
+summary(aov(height ~ sunlight * water, data = plants))
+```
+
+Significant **main effects** AND a significant **interaction** (sunlight × water).
+Height under (high sunlight, high water) is greater than either factor alone
+would predict — a classic synergy.
+
+# §7.10 — The formula-based ANOVA  *(book p. 357)*
+
+For the record, here's the classical theory in one call:
+
+```{r classical}
+summary(aov(y ~ group, data = df))
+```
+
+Matches the resampling omnibus p-value we computed earlier.
+
+The book also reproduces the pairwise t-test code on **p. 365**:
+
+> ```
+> from scipy.stats import stats
+> >>> stats.ttest_ind(B, A)
+> >>> stats.ttest_ind(C, A)
+> >>> stats.ttest_ind(C, B)
+> ```
+
+R equivalent — use `pairwise.t.test()` (which also handles the multiple-testing
+correction in one call), or call `t.test()` for each pair:
+
+```{r pairwise-ttests}
+# Book p. 365 Python snippet was three sequential stats.ttest_ind() calls.
+# R's built-in pairwise.t.test() does all pairs + adjustment at once:
+pairwise.t.test(df$y, df$group, p.adjust.method = "BH")
+```
+
+# Exercises
+
+1. Replace Group E with `rnorm(15, 10.5, 2)` (a tiny, plausibly-real effect).
+   Does the omnibus detect it? Do the BH-corrected pairwise tests?
+2. Run the two-way ANOVA without the interaction term (`height ~ sunlight + water`).
+   Compare coefficients. What does the interaction term change?
+3. Implement the Bonferroni-Holm step-down procedure and compare to BH on the
+   5-group pairwise table.

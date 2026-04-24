@@ -1,0 +1,241 @@
+---
+title: "Chapter 5 — Normal Distributions (R companion)"
+subtitle: "R/tidyverse translation of *Understanding Data*"
+author: "Course notes"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 6.5, fig.height = 4, dpi = 120)
+library(tidyverse)
+library(patchwork)    # install.packages("patchwork")
+set.seed(42)
+```
+
+# Orientation
+
+Chapter 5 (book pp. 187–202) asks a deceptively simple question: **how often
+are real-world data actually Normal?** The answer: less often than the textbook
+suggests. The book contains **one Python reference** in this chapter, quoted in
+§5.2 at p. 195 (see below). This companion simulates the mechanism that
+produces Normal data, builds a Quincunx (Galton board), shows how to test for
+Normality, and reproduces the chapter's examples of phony Normals (IQ) and
+mixed populations.
+
+# §5.1 — Mechanism of the Normal  *(book p. 188)*
+
+## Flipping coins and the Central Limit Theorem
+
+A Normal distribution arises as the **sum of many small independent random
+effects**. Flip a coin 100 times, count heads. Repeat 10,000 times.
+
+```{r coin-sum}
+n_flips    <- 100
+n_trials   <- 10000
+heads_count <- rbinom(n_trials, size = n_flips, prob = 0.5)
+
+tibble(heads = heads_count) |>
+  ggplot(aes(heads)) +
+  geom_histogram(aes(y = after_stat(density)),
+                 binwidth = 1, fill = "steelblue", color = "white") +
+  stat_function(fun = dnorm,
+                args = list(mean = n_flips * 0.5,
+                            sd   = sqrt(n_flips * 0.25)),
+                color = "red", linewidth = 1) +
+  labs(title = "Heads in 100 tosses — a binomial converging to Normal",
+       subtitle = "Red curve: theoretical N(50, √25)",
+       x = "Heads", y = "Density")
+```
+
+The Normal shape emerges because we're summing 100 independent ±½ contributions.
+This is the Central Limit Theorem in action.
+
+## The Gaussian formula
+
+```{r gaussian}
+# φ(x) = (1 / (σ√(2π))) · exp(-(x-μ)² / (2σ²))
+gaussian <- function(x, mu = 0, sigma = 1) {
+  (1 / (sigma * sqrt(2 * pi))) *
+    exp(-((x - mu)^2) / (2 * sigma^2))
+}
+
+# Check against R's built-in:
+all.equal(gaussian(seq(-3, 3, 0.1)),
+          dnorm(seq(-3, 3, 0.1)))
+```
+
+## The Quincunx (Galton board)
+
+Each ball falls through 20 rows of pegs; at each peg it goes left or right with
+probability ½. Its final bin is determined by the sum of 20 independent ±1 steps.
+
+```{r quincunx, fig.width=7, fig.height=4}
+n_rows  <- 20
+n_balls <- 5000
+
+final_position <- replicate(n_balls, sum(sample(c(-1, 1), n_rows, replace = TRUE)))
+
+tibble(position = final_position) |>
+  ggplot(aes(position)) +
+  geom_bar(fill = "steelblue") +
+  labs(title = "Galton board: position after 20 rows of ±1 steps",
+       x = "Final bin", y = "Count")
+```
+
+# §5.2 — Properties of the Normal  *(book p. 192)*
+
+## Center and spread
+
+```{r props}
+mu    <- 100
+sigma <- 15
+
+samp <- rnorm(10000, mean = mu, sd = sigma)
+
+# The ~68–95–99.7 rule
+within_1sd <- mean(abs(samp - mu) <= 1 * sigma)
+within_2sd <- mean(abs(samp - mu) <= 2 * sigma)
+within_3sd <- mean(abs(samp - mu) <= 3 * sigma)
+c(within_1sd = within_1sd,
+  within_2sd = within_2sd,
+  within_3sd = within_3sd)
+```
+
+## Fitting a Normal to data
+
+```{r fit}
+# "Method of moments" fit: estimate μ and σ by sample mean and SD
+data_x <- c(rnorm(80, 10, 2), rnorm(20, 10, 2))  # genuinely Normal
+
+fit_mu    <- mean(data_x)
+fit_sigma <- sd(data_x)
+c(fit_mu = fit_mu, fit_sigma = fit_sigma)
+```
+
+```{r plot-fit}
+tibble(x = data_x) |>
+  ggplot(aes(x)) +
+  geom_histogram(aes(y = after_stat(density)),
+                 bins = 15, fill = "steelblue", color = "white") +
+  stat_function(fun = dnorm, args = list(mean = fit_mu, sd = fit_sigma),
+                color = "red", linewidth = 1) +
+  labs(title = "Histogram with fitted Normal overlaid",
+       x = "x", y = "Density")
+```
+
+## Testing for Normality  *(book §5.2 "Testing whether a given distribution is Normal", p. 195)*
+
+The chapter mentions the **Shapiro-Wilk test** and **QQ plots**. The book's
+only Python reference in this chapter appears here:
+
+> *"[...] the Python call for a QQ plot is `sm.qqplot(data, line='45')`, then use the Python call [...]"* — book p. 195
+
+R equivalents:
+
+```{r normality}
+shapiro.test(data_x)   # H0: data come from a Normal distribution
+```
+
+If p > 0.05 we **fail to reject** Normality (not the same as "it IS Normal" —
+see Ch. 3). For large `n`, the test becomes hypersensitive and rejects tiny,
+irrelevant deviations. **The chapter's advice: trust the QQ plot, not the test.**
+
+```{r qq}
+tibble(x = data_x) |>
+  ggplot(aes(sample = x)) +
+  stat_qq(alpha = 0.5) +
+  stat_qq_line(color = "red") +
+  labs(title = "QQ plot: points on the line ⇒ Normal",
+       x = "Theoretical quantiles", y = "Sample quantiles")
+```
+
+# §5.3 — Real-world distributions are rarely Normal  *(book p. 196)*
+
+## Mixed populations  *(book §5.3, p. 196)*
+
+Put two groups together and the Normal illusion dissolves.
+
+```{r mixed, fig.width=7, fig.height=4}
+mixed <- c(rnorm(500, mean = 10, sd = 2),
+           rnorm(500, mean = 18, sd = 2))
+
+tibble(x = mixed) |>
+  ggplot(aes(x)) +
+  geom_histogram(aes(y = after_stat(density)),
+                 bins = 40, fill = "steelblue", color = "white") +
+  stat_function(fun = dnorm,
+                args = list(mean = mean(mixed), sd = sd(mixed)),
+                color = "red", linewidth = 1) +
+  labs(title = "Mixture of two Normals, fit with a single Normal",
+       subtitle = "The single-Normal fit misses the bimodality entirely",
+       x = "x", y = "Density")
+```
+
+```{r shapiro-mixed}
+shapiro.test(mixed)  # correctly rejects Normality
+```
+
+## Long tails  *(book §5.3, p. 198)*
+
+Real data often have heavier tails than a Normal predicts. A Student-t with 3 df
+looks Normal-ish in the middle but has clear fat tails.
+
+```{r long-tails, fig.width=7, fig.height=4}
+heavy <- rt(5000, df = 3)
+
+tibble(x = heavy) |>
+  ggplot(aes(sample = x)) +
+  stat_qq(alpha = 0.3) + stat_qq_line(color = "red") +
+  labs(title = "QQ plot of t(df=3): heavy tails curve away from the line")
+```
+
+Compare how many points fall beyond ±3 SD:
+
+```{r beyond-3sd}
+mean(abs(heavy - mean(heavy)) > 3 * sd(heavy))   # Much more than the 0.3% a true Normal would give
+```
+
+## The phony IQ Normal  *(book §5.3 "Phony Normal distributions: the case of IQ", p. 200)*
+
+The chapter makes a striking point: IQ distributions appear Normal only because
+they are **constructed that way** — the test-scoring procedure forces the
+output onto a Normal curve. The underlying trait isn't necessarily Normal at all.
+
+```{r iq-phony, fig.width=7, fig.height=4}
+# Simulate a non-Normal latent trait (skewed)
+true_trait <- rgamma(5000, shape = 2, rate = 0.05)
+
+# "Normalize" it using an inverse-CDF transform
+forced_normal <- qnorm(rank(true_trait) / (length(true_trait) + 1),
+                       mean = 100, sd = 15)
+
+patchwork::wrap_plots(
+  tibble(x = true_trait)   |> ggplot(aes(x)) +
+    geom_histogram(fill = "steelblue", bins = 40) +
+    labs(title = "Latent trait (skewed)"),
+  tibble(x = forced_normal) |> ggplot(aes(x)) +
+    geom_histogram(fill = "darkred", bins = 40) +
+    labs(title = "After forced normalization (IQ-style)"),
+  nrow = 1
+)
+```
+
+The second histogram is "Normal" by construction. Any conclusion about the
+trait based on Normality is unfounded.
+
+# Exercises
+
+1. Run the coin-sum simulation with `n_flips = 2`, `5`, `20`, `100`. Plot the
+   densities. At which `n_flips` does the shape visibly converge to Normal?
+2. Apply `shapiro.test()` to `rexp(30)`, `rexp(300)`, and `rexp(3000)`. Does the
+   p-value depend on sample size? What does that tell you about the test?
+3. For the mixed example, can you fit a **mixture** of two Normals (use the
+   `mixtools` package, `normalmixEM()`). How do the recovered means and SDs
+   compare to the truth?

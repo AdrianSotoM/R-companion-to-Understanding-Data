@@ -1,0 +1,267 @@
+---
+title: "Chapter 10 — Regression (R companion)"
+subtitle: "R/tidyverse translation of *Understanding Data*"
+author: "Course notes"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 7, fig.height = 4, dpi = 120)
+library(tidyverse)
+set.seed(42)
+```
+
+# Orientation
+
+Chapter 10 (book pp. 509–556) goes from correlation to **regression**: fitting
+a line (or curve) and using it to predict. The book contains **no Python code
+listings** in this chapter. It covers OLS, absolute-value, and orthogonal
+regression, then moves to logistic and spline regression. We implement OLS from
+scratch, then use R's `lm()` / `glm()` for the rest.
+
+# §10.1 — Purpose of regression  *(book p. 509)*
+
+We want a rule `y ≈ f(x)`. Three uses:
+
+1. **Describe** the trend.
+2. **Predict** y at a new x.
+3. **Test** whether the slope differs from zero.
+
+```{r make-xy}
+n <- 100
+x <- runif(n, 0, 10)
+y <- 2 + 1.5 * x + rnorm(n, sd = 2)
+xy <- tibble(x = x, y = y)
+
+ggplot(xy, aes(x, y)) +
+  geom_point(alpha = 0.6) +
+  labs(title = "Bivariate data with a linear trend")
+```
+
+# §10.2 — Linear regression  *(book p. 515)*
+
+## Ordinary Least Squares by hand  *(book §10.2 "Ordinary Least Squares regression", p. 517)*
+
+The OLS solution minimizes the sum of **squared vertical** residuals:
+
+$$\hat{\beta}_1 = \frac{\sum (x_i - \bar{x})(y_i - \bar{y})}{\sum (x_i - \bar{x})^2}, \quad
+  \hat{\beta}_0 = \bar{y} - \hat{\beta}_1 \bar{x}$$
+
+```{r ols-by-hand}
+beta1_hat <- sum((x - mean(x)) * (y - mean(y))) /
+             sum((x - mean(x))^2)
+beta0_hat <- mean(y) - beta1_hat * mean(x)
+c(intercept = beta0_hat, slope = beta1_hat)
+```
+
+Check against `lm()`:
+
+```{r ols-lm}
+coef(lm(y ~ x))
+```
+
+## Plot the fit
+
+```{r ols-plot}
+ggplot(xy, aes(x, y)) +
+  geom_point(alpha = 0.6) +
+  geom_abline(intercept = beta0_hat, slope = beta1_hat,
+              color = "red", linewidth = 1) +
+  labs(title = sprintf("OLS fit: y = %.2f + %.2f × x", beta0_hat, beta1_hat))
+```
+
+## When is vertical distance the right choice?  *(book §10.2 "When is it OK to use vertical distances?" and "Orthogonal regression", pp. 516, 525)*
+
+Vertical distance makes sense when `x` is measured precisely (or chosen) and
+only `y` has error. When **both** have measurement error, OLS is biased and
+you should use **orthogonal regression**:
+
+```{r orthogonal}
+# Orthogonal (total least squares) via principal component
+xc <- scale(xy$x, scale = FALSE)
+yc <- scale(xy$y, scale = FALSE)
+pc <- prcomp(cbind(xc, yc))
+
+v          <- pc$rotation[, 1]            # first principal component
+slope_orth <- v[2] / v[1]
+intercept_orth <- mean(y) - slope_orth * mean(x)
+c(intercept_orth = intercept_orth, slope_orth = slope_orth)
+```
+
+## Absolute-value (L1) regression  *(book §10.2, p. 524)*
+
+Minimize `Σ|y − (β₀ + β₁x)|` — robust to outliers.
+
+```{r l1-regression}
+library(quantreg)   # install.packages("quantreg")
+rq_fit <- rq(y ~ x, tau = 0.5)   # median regression = L1
+coef(rq_fit)
+```
+
+```{r compare-methods}
+methods <- tibble(
+  method    = c("OLS (vertical)", "Orthogonal", "L1 (median)"),
+  intercept = c(beta0_hat, intercept_orth, coef(rq_fit)[1]),
+  slope     = c(beta1_hat, slope_orth,     coef(rq_fit)[2])
+)
+methods
+```
+
+With clean Normal data they agree. With outliers, L1 will diverge from OLS
+(exercise 1).
+
+# §10.3 — Nonlinear regression  *(book p. 527)*
+
+## Logistic regression  *(book §10.3, p. 527)*
+
+For binary outcomes. Each observation is 0/1; model the probability as
+`1 / (1 + exp(−(β₀ + β₁x)))`.
+
+```{r logistic}
+set.seed(1)
+n <- 200
+x <- runif(n, -3, 3)
+logit_p <- -1 + 2 * x
+p <- plogis(logit_p)                  # logistic function
+y <- rbinom(n, size = 1, prob = p)    # binary outcome
+
+log_df <- tibble(x = x, y = y)
+
+fit_log <- glm(y ~ x, data = log_df, family = binomial)
+summary(fit_log)
+```
+
+```{r logistic-plot}
+pred <- tibble(x = seq(-3, 3, 0.1))
+pred$p <- predict(fit_log, newdata = pred, type = "response")
+
+ggplot(log_df, aes(x, y)) +
+  geom_jitter(height = 0.05, alpha = 0.5) +
+  geom_line(data = pred, aes(x, p), color = "red", linewidth = 1) +
+  labs(title = "Logistic regression: P(y = 1 | x)", y = "P(y = 1)")
+```
+
+## Spline regression  *(book §10.3, p. 533)*
+
+When the relationship is curvy but you don't know the functional form.
+
+```{r spline}
+n <- 200
+x <- sort(runif(n, 0, 10))
+y <- sin(x) + 0.1 * x + rnorm(n, sd = 0.3)
+
+spline_df <- tibble(x = x, y = y)
+
+# Natural cubic spline with 6 knots
+library(splines)
+fit_spline <- lm(y ~ ns(x, df = 6), data = spline_df)
+spline_df$yhat <- predict(fit_spline)
+
+ggplot(spline_df, aes(x, y)) +
+  geom_point(alpha = 0.5) +
+  geom_line(aes(y = yhat), color = "red", linewidth = 1) +
+  labs(title = "Spline regression (df = 6)")
+```
+
+# §10.4 — Significance and CIs for the slope  *(book p. 537)*
+
+## Permutation test
+
+```{r slope-sig}
+# Use the first (linear) example again
+xy <- tibble(x = runif(100, 0, 10),
+             y = NA)
+xy$y <- 0.3 * xy$x + rnorm(100, sd = 3)   # weak true slope
+
+obs_slope <- coef(lm(y ~ x, data = xy))[2]
+
+n_sim <- 5000
+null_slope <- numeric(n_sim)
+for (i in seq_len(n_sim)) {
+  shuffled <- xy
+  shuffled$y <- sample(xy$y)             # break x–y link
+  null_slope[i] <- coef(lm(y ~ x, data = shuffled))[2]
+}
+
+p_value <- mean(abs(null_slope) >= abs(obs_slope))
+p_value
+```
+
+## Bootstrap CI for the slope
+
+```{r slope-ci}
+B <- 10000
+boot_slope <- numeric(B)
+for (i in seq_len(B)) {
+  idx <- sample(seq_len(nrow(xy)), nrow(xy), replace = TRUE)
+  boot_slope[i] <- coef(lm(y ~ x, data = xy[idx, ]))[2]
+}
+quantile(boot_slope, c(0.025, 0.975))
+```
+
+Compare to the parametric CI:
+
+```{r parametric-ci}
+confint(lm(y ~ x, data = xy), "x")
+```
+
+## Wildfires example  *(book §10.4 "Are wildfires increasing in CA?", p. 540)*
+
+```{r wildfires}
+# Chapter's question: are California wildfires increasing?
+# Simulated annual-burned-acres series:
+years <- 1970:2025
+acres <- 50000 + 3000 * (years - 1970) + rnorm(length(years), sd = 80000)
+fires <- tibble(year = years, acres = acres)
+
+fit <- lm(acres ~ year, data = fires)
+summary(fit)$coefficients
+confint(fit)
+
+ggplot(fires, aes(year, acres)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", color = "red") +
+  labs(title = "California acres burned, 1970–2025 (simulated)")
+```
+
+A significant positive slope with a CI excluding zero: consistent with an
+increasing trend. But a LINEAR model may be too simple — try a spline and
+compare:
+
+```{r wildfires-spline}
+fit_sp <- lm(acres ~ ns(year, df = 4), data = fires)
+fires$linear <- predict(fit,    newdata = fires)
+fires$spline <- predict(fit_sp, newdata = fires)
+
+ggplot(fires, aes(year, acres)) +
+  geom_point(alpha = 0.5) +
+  geom_line(aes(y = linear), color = "red") +
+  geom_line(aes(y = spline), color = "blue", linewidth = 1) +
+  labs(title = "Linear (red) vs. spline (blue) fits")
+```
+
+The spline reveals whether the trend is linear, accelerating, or decelerating —
+information the linear fit hides.
+
+# §10.5 — The ugly history  *(book §10.5 "The ugly history of correlation, regression, p-values and NHST", p. 549)*
+
+A narrative section on Galton, Pearson, Fisher, and the eugenicist origins of
+much of classical statistics. No code — but a reason, the chapter argues, to
+be suspicious of "p < 0.05 as gospel".
+
+# Exercises
+
+1. Add 5 outliers at large `x`, small `y` to the linear dataset. Re-fit OLS,
+   L1, and orthogonal. Which methods move the most? Which reflect the "honest"
+   relationship?
+2. For the logistic fit, compute the `x` at which P(y = 1) = 0.5. (Hint: set
+   β₀ + β₁x = 0.) Add a vertical line at that `x` to the plot.
+3. Fit splines with df = 3, 6, 12, 20 to the sine example. Plot all four.
+   Discuss the bias-variance trade-off (under/over-fitting).

@@ -1,0 +1,213 @@
+---
+title: "Chapter 3 — Probabilities and Hypothesis Testing (R companion)"
+subtitle: "R/tidyverse translation of *Understanding Data*"
+author: "Course notes"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 6.5, fig.height = 4, dpi = 120)
+library(tidyverse)
+set.seed(42)
+```
+
+# Orientation
+
+Chapter 3 (book pp. 103–152) introduces **simulation-based NHST**: instead of invoking
+a theoretical distribution, we construct the null world by computer and see how extreme
+our observation is in that world. The book contains **no Python code listings** in this
+chapter. This companion builds the machinery from loops (transparent, slow) up to
+vectorized R (fast, idiomatic).
+
+# §3.1 — Modeling and simulating probabilities  *(book p. 103)*
+
+## A fair coin
+
+```{r fair-coin}
+# Simulate 1 toss: rbinom(n_experiments, size = n_tosses_per_experiment, prob)
+rbinom(10, size = 1, prob = 0.5)          # 10 individual tosses, 0 = tails
+
+# Simulate 1000 experiments of 10 tosses each, count heads in each
+heads <- rbinom(1000, size = 10, prob = 0.5)
+table(heads)
+```
+
+```{r coin-hist}
+tibble(heads = heads) |>
+  ggplot(aes(heads)) +
+  geom_bar(fill = "steelblue") +
+  scale_x_continuous(breaks = 0:10) +
+  labs(title = "Distribution of heads in 1000 trials of 10 flips",
+       x = "Number of heads", y = "Frequency")
+```
+
+## Rolling dice
+
+```{r dice}
+# Sample uniformly from {1..6}, with replacement, 10,000 times
+rolls <- sample(1:6, size = 10000, replace = TRUE)
+prop.table(table(rolls))   # empirical probabilities converge to 1/6
+```
+
+# §3.2 — Null Hypothesis Significance Testing by simulation  *(book p. 112)*
+
+## The setup
+
+Suppose we observe 7 heads out of 10 tosses of a coin. Is it unfair?
+
+```{r nhst-setup}
+observed_heads <- 7
+n_tosses       <- 10
+```
+
+The null hypothesis: **the coin is fair**, `p = 0.5`.
+
+## Simulate the null world
+
+```{r simulate-null, fig.width=7, fig.height=4}
+# Faithful loop version — this is what a pedagogical translation looks like
+n_sim <- 10000
+null_heads <- numeric(n_sim)
+for (i in seq_len(n_sim)) {
+  tosses <- sample(c("H", "T"), size = n_tosses, replace = TRUE)
+  null_heads[i] <- sum(tosses == "H")
+}
+
+# Equivalent idiomatic R (much faster):
+# null_heads <- rbinom(n_sim, size = n_tosses, prob = 0.5)
+
+tibble(heads = null_heads) |>
+  ggplot(aes(heads)) +
+  geom_bar(fill = "grey70") +
+  geom_vline(xintercept = observed_heads, color = "red", linewidth = 1) +
+  scale_x_continuous(breaks = 0:10) +
+  labs(title = "Null distribution with observed value (red)",
+       subtitle = paste("Observed:", observed_heads, "heads out of", n_tosses),
+       x = "Heads under the null", y = "Frequency")
+```
+
+## Compute the p-value
+
+```{r compute-p}
+# Two-sided p-value: "at least as extreme" in either direction.
+# "As extreme" here means |heads − 5| >= |7 − 5| = 2
+observed_distance <- abs(observed_heads - n_tosses/2)
+p_value <- mean(abs(null_heads - n_tosses/2) >= observed_distance)
+p_value
+```
+
+This matches what `binom.test()` gives us analytically:
+
+```{r binom-test}
+binom.test(x = observed_heads, n = n_tosses, p = 0.5)$p.value
+```
+
+## Surprise value  *(book §3.2, p. 117)*
+
+The chapter introduces **surprise** `S = -log₂(p)` — the number of bits of
+evidence against the null. It puts tiny p-values on a more intuitive scale:
+`p = 0.05` → S ≈ 4.3 bits; `p = 0.001` → S ≈ 10 bits.
+
+```{r surprise}
+surprise <- function(p) -log2(p)
+tibble(
+  p  = c(0.5, 0.1, 0.05, 0.01, 0.001, 1e-6),
+  S_bits = surprise(p)
+)
+```
+
+# §3.2 — Factors that influence the p-value  *(book p. 125)*
+
+Three knobs control how small a p-value you get:
+
+1. **Effect size** — how far the true `p_coin` is from 0.5.
+2. **Sample size** — `n_tosses`.
+3. **Noise** — the inherent variability.
+
+```{r knobs, fig.width=8, fig.height=4}
+simulate_p <- function(n_tosses, true_p, n_sim = 5000) {
+  null_heads     <- rbinom(n_sim, size = n_tosses, prob = 0.5)   # null world
+  observed_heads <- rbinom(1,     size = n_tosses, prob = true_p) # one "real" expt
+  obs_dist <- abs(observed_heads - n_tosses/2)
+  mean(abs(null_heads - n_tosses/2) >= obs_dist)
+}
+
+grid <- expand_grid(
+  n_tosses = c(10, 50, 200, 1000),
+  true_p   = c(0.50, 0.55, 0.60, 0.70)
+) |>
+  rowwise() |>
+  mutate(p_value = simulate_p(n_tosses, true_p)) |>
+  ungroup()
+
+ggplot(grid, aes(n_tosses, p_value, color = factor(true_p))) +
+  geom_line() + geom_point() +
+  geom_hline(yintercept = 0.05, linetype = "dashed") +
+  scale_x_log10() + scale_y_log10() +
+  labs(title = "p-value as sample size and true effect vary",
+       x = "n (log scale)", y = "p-value (log scale)",
+       color = "true p")
+```
+
+Takeaway: with enough `n`, even a 0.55 coin (barely unfair) is flagged as
+"significant". That's why the chapter insists on **reporting the effect size**,
+not just the p-value.
+
+# §3.3 — What's wrong with NHST?  *(book p. 132)*
+
+Reproduce the chapter's critiques:
+
+## (a) α = 0.05 is too lax  *(book §3.3, p. 132)*
+
+```{r lax-alpha}
+# If 100 studies per year test true nulls at α = 0.05,
+# we expect about 5 "significant" false alarms every year.
+# Across a whole literature, the false discovery rate is large.
+
+# Across many experiments, the fraction of false positives at the chosen α is α.
+n_exp <- 5000
+alphas <- c(0.05, 0.01, 0.001)
+p_values <- replicate(n_exp, {
+  # True null: x ~ N(0,1), test H0: mean = 0
+  x <- rnorm(30)
+  t.test(x, mu = 0)$p.value
+})
+map_dbl(alphas, \(a) mean(p_values < a))
+```
+
+## (b) Confidence intervals are more informative  *(book §3.3, p. 142)*
+
+```{r ci-better}
+x <- rnorm(30, mean = 0.2, sd = 1)
+t.test(x, mu = 0)$p.value         # Just a yes/no
+t.test(x, mu = 0)$conf.int        # Tells us the plausible range of the true mean
+```
+
+A CI of, say, `[-0.05, 0.55]` is far more informative than "p = 0.07 (not
+significant)".
+
+## (c) p is not P(H0 | data)  *(book §3.3 "The p-value is the answer to the wrong question", p. 143)*
+
+This is Chapter 12's full topic, but here's the preview:
+
+```{r wrong-question}
+# p-value answers: "If H0 were true, how often would we see data this extreme?"
+# It does NOT answer: "Given these data, how likely is H0?"
+# The second question requires Bayes' theorem and a prior probability.
+```
+
+# Exercises
+
+1. Repeat the 7-out-of-10 analysis with observed = 70 out of 100. Is the p-value
+   the same? Why not?
+2. Flip the surprise formula. What p corresponds to "1 bit of evidence"? "20 bits"?
+3. Using the `simulate_p()` function, find the smallest `n_tosses` at which a true
+   `p_coin = 0.55` gives a p-value below 0.01 about 80 % of the time. (This is a
+   power calculation, previewed for Chapter 11.)

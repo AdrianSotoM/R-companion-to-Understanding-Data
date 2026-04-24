@@ -1,0 +1,277 @@
+---
+title: "Chapter 8 — Independence, Proportions, and Relative Risk (R companion)"
+subtitle: "R/tidyverse translation of *Understanding Data*"
+author: "Course notes"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 7, fig.height = 4, dpi = 120)
+library(tidyverse)
+set.seed(42)
+```
+
+# Orientation
+
+Chapter 8 (book pp. 366–447) works with count data: are two proportions the same,
+are observations independent of group membership, what's the relative risk?
+The chapter's signature move is **simulation-based χ-square** — translated below
+from the book's Python snippets at **p. 379**.
+
+# §8.1 — Observed vs expected histograms  *(book §8.1 "Comparing histograms of observations to expectations", p. 367)*
+
+Suppose we observe 12 balls drawn from an urn:
+
+```{r observed}
+observed <- c(a = 9, b = 3)       # observed frequencies
+n        <- sum(observed)
+outcomes <- names(observed)
+
+# Under the null, balls are equally likely: E(a) = E(b) = 6
+expected <- c(a = n/2, b = n/2)
+
+tibble(outcome  = names(observed),
+       observed = observed,
+       expected = expected) |>
+  pivot_longer(c(observed, expected)) |>
+  ggplot(aes(outcome, value, fill = name)) +
+  geom_col(position = "dodge") +
+  labs(title = "Observed (O) vs Expected (E)", y = "count", fill = NULL)
+```
+
+# §8.2 — The distance χ between observation and expectation  *(book p. 373)*
+
+The chapter's definition (simpler than the textbook χ²):
+
+$$ \chi = \sum_i \frac{|O_i - E_i|}{\sqrt{E_i}} $$
+
+```{r chi-distance}
+chi_distance <- function(O, E) sum(abs(O - E) / sqrt(E))
+chi_obs <- chi_distance(observed, expected)
+chi_obs
+```
+
+Compare to the classical χ² statistic:
+
+```{r chi2-classical}
+chi2_classical <- function(O, E) sum((O - E)^2 / E)
+chi2_classical(observed, expected)
+```
+
+# §8.3 — Is χ_obs "large"? NHST by sampling with replacement  *(book p. 377)*
+
+**Chapter's Python (reproduced from book p. 379):**
+```python
+import numpy as np
+outcomes = ['a', 'b']
+n = 12
+p_outcomes = [6/12, 6/12]
+pseudo_observed = np.random.choice(
+    outcomes, size=n, replace=True, p=p_outcomes)
+```
+
+**R translation:**
+
+```{r sample-with-replacement}
+n_sim <- 10000
+null_chi <- numeric(n_sim)
+
+for (i in seq_len(n_sim)) {
+  # Draw n balls from the null distribution (equal proportions)
+  pseudo_observed <- sample(outcomes, size = n, replace = TRUE,
+                            prob = c(6/12, 6/12))
+  # Count each outcome
+  counts <- table(factor(pseudo_observed, levels = outcomes))
+  # Distance from the expected
+  null_chi[i] <- chi_distance(as.numeric(counts), expected)
+}
+
+p_value <- mean(null_chi >= chi_obs)
+p_value
+```
+
+```{r chi-null-plot}
+tibble(chi = null_chi) |>
+  ggplot(aes(chi)) +
+  geom_histogram(bins = 40, fill = "grey70", color = "white") +
+  geom_vline(xintercept = chi_obs, color = "red", linewidth = 1) +
+  labs(title = "Null distribution of χ by sampling with replacement",
+       subtitle = paste("Observed χ =", signif(chi_obs, 3),
+                        " | p =", signif(p_value, 3)))
+```
+
+## Fractional expected counts  *(book p. 379, second snippet)*
+
+The chapter's second Python snippet uses E(a) = 5.7, E(b) = 6.3:
+
+```python
+p_outcomes = [5.7/12, 6.3/12]
+pseudo_observed = np.random.choice(
+    outcomes, size=n, replace=True, p=p_outcomes)
+```
+
+R equivalent is just changing the `prob` argument:
+
+```{r fractional}
+p_out <- c(a = 5.7/12, b = 6.3/12)
+pseudo <- sample(outcomes, size = n, replace = TRUE, prob = p_out)
+pseudo
+```
+
+# §8.4 — Post-hoc: the "Mt. Fuji plot"  *(book p. 385)*
+
+When there are many categories and the omnibus χ rejects the null, which
+categories are driving the signal? Compute a standardized residual per category
+and visualize.
+
+```{r mt-fuji}
+# Roulette wheel example: 38 slots (0, 00, 1-36). Observed frequencies over 380 spins
+set.seed(1)
+obs_roulette <- rmultinom(1, size = 380,
+                          prob = c(rep(1/38, 37), 2/38))[, 1]   # slot 38 biased
+names(obs_roulette) <- c(as.character(0:36), "00")
+
+exp_roulette <- rep(380 / 38, 38)
+names(exp_roulette) <- names(obs_roulette)
+
+# Signed standardized residual per slot: (O - E) / sqrt(E)
+residuals_df <- tibble(
+  slot       = names(obs_roulette),
+  observed   = as.integer(obs_roulette),
+  expected   = exp_roulette,
+  residual   = (observed - expected) / sqrt(expected)
+)
+
+ggplot(residuals_df, aes(reorder(slot, -abs(residual)), residual)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Mt. Fuji plot: which slots deviate most from uniform?",
+       x = "slot", y = "(O − E) / √E") +
+  theme(axis.text.x = element_text(angle = 90, size = 6))
+```
+
+Slots with the tallest bars on either side are the biggest contributors.
+
+# §8.5 — Comparing two observed histograms (2-D contingency)  *(book p. 396)*
+
+```{r clinical-trial}
+# Clinical trial: treatment vs placebo, outcome = improved / not improved
+trial <- matrix(c(40, 60,     # treatment:  40 improved, 60 not
+                  20, 80),    # placebo:    20 improved, 80 not
+                nrow = 2, byrow = TRUE,
+                dimnames = list(arm = c("treatment", "placebo"),
+                                outcome = c("improved", "not")))
+trial
+```
+
+Build the expected table under independence (same improvement rate in both arms):
+
+```{r expected-table}
+row_totals <- rowSums(trial)
+col_totals <- colSums(trial)
+grand      <- sum(trial)
+
+expected_trial <- outer(row_totals, col_totals) / grand
+expected_trial
+
+chi_obs_trial <- sum(abs(trial - expected_trial) / sqrt(expected_trial))
+chi_obs_trial
+```
+
+Permutation test: shuffle outcomes across arms preserving row totals.
+
+```{r perm-trial}
+# Reconstruct the individual-level data
+ind_trial <- tibble(
+  arm     = rep(c("treatment", "placebo"), times = row_totals),
+  outcome = c(rep(c("improved", "not"), trial["treatment", ]),
+              rep(c("improved", "not"), trial["placebo",   ]))
+)
+
+n_sim <- 10000
+null_chi <- numeric(n_sim)
+for (i in seq_len(n_sim)) {
+  shuffled <- ind_trial |> mutate(outcome = sample(outcome))
+  tab      <- table(shuffled$arm, shuffled$outcome)
+  exp_t    <- outer(rowSums(tab), colSums(tab)) / sum(tab)
+  null_chi[i] <- sum(abs(tab - exp_t) / sqrt(exp_t))
+}
+mean(null_chi >= chi_obs_trial)
+```
+
+Compare to the classical test:
+
+```{r classical-chisq}
+chisq.test(trial)
+fisher.test(trial)   # exact, useful for small counts
+```
+
+# §8.6 — Survival on the Titanic  *(book p. 408)*
+
+```{r titanic}
+# Built-in Titanic data: passenger class × survival
+titanic_df <- as_tibble(Titanic) |>
+  filter(Sex == "Male", Age == "Adult") |>
+  group_by(Class, Survived) |>
+  summarise(n = sum(n), .groups = "drop") |>
+  pivot_wider(names_from = Survived, values_from = n)
+
+titanic_df
+
+titanic_mat <- as.matrix(titanic_df[, -1])
+rownames(titanic_mat) <- titanic_df$Class
+titanic_mat
+
+chisq.test(titanic_mat)
+```
+
+# §8.8–8.9 — Relative Risk and Absolute Risk Reduction  *(book pp. 427, 429)*
+
+```{r risk-measures}
+# From the clinical trial table
+risk_treatment <- trial["treatment", "improved"] / sum(trial["treatment", ])
+risk_placebo   <- trial["placebo",   "improved"] / sum(trial["placebo",   ])
+
+RR  <- risk_treatment / risk_placebo   # relative risk
+ARR <- risk_treatment - risk_placebo   # absolute risk reduction (or increase)
+NNT <- 1 / ARR                         # number needed to treat
+c(RR = RR, ARR = ARR, NNT = NNT)
+```
+
+# §8.11 — Bootstrap CI for relative risk  *(book p. 434)*
+
+```{r rr-ci}
+B <- 10000
+RR_boot <- numeric(B)
+
+for (i in seq_len(B)) {
+  # Resample within each arm separately
+  t_star <- sample(c(rep(1, trial["treatment", "improved"]),
+                     rep(0, trial["treatment", "not"])),
+                   replace = TRUE)
+  p_star <- sample(c(rep(1, trial["placebo",   "improved"]),
+                     rep(0, trial["placebo",   "not"])),
+                   replace = TRUE)
+  RR_boot[i] <- mean(t_star) / mean(p_star)
+}
+
+quantile(RR_boot, c(0.025, 0.975))
+```
+
+Report: `RR = 2.00 (95% CI 1.25 to 3.21)`. CI excludes 1, consistent with a
+treatment benefit.
+
+# Exercises
+
+1. Replicate the fractional-sampling chapter example with E(a) = 5.7, E(b) = 6.3.
+   Simulate 10,000 draws of n = 12 and plot the null distribution of χ.
+2. For the Titanic data, compare `chisq.test()` to a permutation χ with 10,000
+   shuffles. Do they agree?
+3. Compute a bootstrap CI for the odds ratio of the trial (not just RR). How
+   does it compare to what `fisher.test()` reports?

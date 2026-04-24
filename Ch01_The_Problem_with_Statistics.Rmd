@@ -1,0 +1,139 @@
+---
+title: "Chapter 1 — The Problem with Statistics (R companion)"
+subtitle: "R/tidyverse translation of *Understanding Data*"
+author: "Course notes"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 6, fig.height = 4, dpi = 120)
+library(tidyverse)
+set.seed(1)
+```
+
+# Orientation
+
+Chapter 1 (book pp. 17–22) is a narrative chapter — it has no code. It argues that a large fraction of
+the published scientific literature is unreliable, and blames weak statistical practice
+(especially rigid reliance on `p < 0.05`, §1.3). Because the chapter contains no Python,
+this R companion illustrates the **diagnostic symptoms** the author describes so that
+you can see them in real numbers before we learn the cures in later chapters.
+
+Three symptoms are worth simulating here:
+
+1. How often a true null gets "rejected" at the conventional α = 0.05 threshold.
+2. How much a single arbitrary choice (the threshold itself) changes conclusions.
+3. Why "statistically significant" does not mean "scientifically meaningful".
+
+> **Prerequisites for this series.** R ≥ 4.1 (native pipe `|>`), `tidyverse`,
+> and — in later chapters — `ggbeeswarm`, `patchwork`, `splines`, `quantreg`,
+> `pwr`. Install with
+> `install.packages(c("tidyverse", "ggbeeswarm", "patchwork", "quantreg", "pwr"))`.
+
+# Symptom 1 — α = 0.05 produces a lot of false alarms
+
+*(Book §1.3, "Weak statistical standards", pp. 21–22.)*
+
+If we run a two-sample t-test on data drawn from the *same* distribution, the null
+hypothesis is literally true. Yet ~5 % of the time we get `p < 0.05`. Let's check.
+
+```{r false-alarm}
+# 10,000 experiments where groups A and B come from the same N(0,1) population
+n_experiments <- 10000
+n_per_group   <- 30
+
+# A plain for-loop is clearer and faster than rowwise() here.
+p_values <- numeric(n_experiments)
+for (i in seq_len(n_experiments)) {
+  A <- rnorm(n_per_group)   # group A, 30 obs, same population
+  B <- rnorm(n_per_group)   # group B, 30 obs, same population
+  p_values[i] <- t.test(A, B)$p.value
+}
+results <- tibble(p_value = p_values)
+
+mean(results$p_value < 0.05)   # should be ≈ 0.05
+```
+
+That ≈ 5 % rate is *by construction* — α = 0.05 means "accept a 5 % false-alarm rate".
+Across thousands of tests in a literature, that is a lot of spurious findings.
+
+```{r p-histogram}
+ggplot(results, aes(p_value)) +
+  geom_histogram(boundary = 0, binwidth = 0.05, color = "white") +
+  geom_vline(xintercept = 0.05, linetype = "dashed", color = "red") +
+  labs(title = "p-values under a true null are uniformly distributed on [0,1]",
+       subtitle = "Everything left of the red line is a false alarm at α = 0.05",
+       x = "p-value", y = "count")
+```
+
+The histogram is flat. Under the null, every p-value is equally likely — there is
+nothing special about 0.05 except that 5 % of the mass lies below it.
+
+# Symptom 2 — the threshold is arbitrary
+
+*(Book §1.3, "p-values and statistical significance", p. 22 — and Ch. 3 §3.3 p. 132, "α = 0.05 is not strong enough; use α = 0.01 or better 0.001".)*
+
+The chapter urges using α = 0.01 or 0.001 instead. Count the same 10,000 experiments
+at three thresholds:
+
+```{r thresholds}
+results |>
+  summarise(
+    `α = 0.05`  = mean(p_value < 0.05),
+    `α = 0.01`  = mean(p_value < 0.01),
+    `α = 0.001` = mean(p_value < 0.001)
+  )
+```
+
+Moving the threshold is the entire difference between a "positive" and a "negative"
+study, even though the data never changed. That fragility is the author's point.
+
+# Symptom 3 — significance ≠ importance
+
+*(Previews book §3.3 "NHST gives us no clue as to effect size", p. 142.)*
+
+With a large enough sample, trivially small effects become "significant".
+
+```{r tiny-effect}
+# True mean difference of 0.05 SD — almost nothing clinically
+tiny_effect <- function(n) {
+  A <- rnorm(n, mean = 0.00, sd = 1)
+  B <- rnorm(n, mean = 0.05, sd = 1)   # 0.05 SD shift
+  t.test(A, B)$p.value
+}
+
+# At n = 50 per group, the tiny effect is usually not detected.
+# At n = 50,000 per group, it almost always is.
+tibble(
+  n_per_group = c(50, 500, 5000, 50000),
+  p_value     = map_dbl(n_per_group, tiny_effect)
+)
+```
+
+A `p` of 10⁻⁸ with a 0.05-SD shift tells you the sample is huge, not that the effect
+matters. Chapter 6 and Chapter 11 return to this: report an **effect size with a
+confidence interval**, not just a p-value.
+
+# What's next
+
+The remaining chapters build up the tools:
+
+| Chapter | Tool                                          |
+|---------|-----------------------------------------------|
+| 2       | Dot/beeswarm plots, histograms, KDEs          |
+| 3       | Simulation-based p-values, the null world     |
+| 4       | Confidence intervals by resampling            |
+| 6–8     | Comparing groups, proportions, chi-squared    |
+| 9–10    | Correlation, regression                       |
+| 11      | Statistical power                             |
+| 12      | Bayesian updating and PPV                     |
+
+Every subsequent `.Rmd` in this series follows the same structure: orientation,
+faithful simulation, then the idiomatic R shortcut where one exists.

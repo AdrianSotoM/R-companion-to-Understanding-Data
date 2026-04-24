@@ -1,0 +1,258 @@
+---
+title: "Chapter 9 — Bivariate Data: Correlation and Beyond (R companion)"
+subtitle: "R/tidyverse translation of *Understanding Data*"
+author: "Course notes"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 7, fig.height = 4, dpi = 120)
+library(tidyverse)
+set.seed(42)
+```
+
+# Orientation
+
+Chapter 9 (book pp. 448–508) is about measuring **association** between two
+variables: Pearson's r, Spearman's ρ, and mutual information. The book contains
+**no Python code listings** in this chapter. It repeatedly warns: always
+**look at the scatterplot first**.
+
+# §9.1 — Scatterplots come first  *(book §9.1 "Bivariate data: two measurements", p. 448)*
+
+```{r anscombe, fig.width=9, fig.height=6}
+# Anscombe's quartet: four data sets with identical r, means, SDs, and regression lines
+data("anscombe")
+anscombe_long <- anscombe |>
+  pivot_longer(everything(),
+               names_to = c(".value", "set"),
+               names_pattern = "(.)(.)")
+
+ggplot(anscombe_long, aes(x, y)) +
+  geom_point(size = 2, color = "steelblue") +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  facet_wrap(~ set, labeller = label_both) +
+  labs(title = "Anscombe's quartet — same r, very different data")
+```
+
+```{r anscombe-r}
+anscombe_long |>
+  group_by(set) |>
+  summarise(r = cor(x, y), .groups = "drop")
+```
+
+All four sets have r ≈ 0.816. The scatterplots tell completely different stories.
+
+# §9.2 — The correlation coefficient  *(book p. 456)*
+
+## Build it from scratch
+
+Covariance, then correlation:
+
+```{r r-from-scratch}
+# Use the first Anscombe dataset
+d1 <- anscombe_long |> filter(set == "1")
+x <- d1$x
+y <- d1$y
+
+# Covariance: average of (x − x̄)(y − ȳ)
+cov_manual <- sum((x - mean(x)) * (y - mean(y))) / (length(x) - 1)
+all.equal(cov_manual, cov(x, y))
+
+# Pearson's r: covariance normalized by SD_x × SD_y
+r_manual <- cov_manual / (sd(x) * sd(y))
+all.equal(r_manual, cor(x, y))
+```
+
+## When does r fail?
+
+Non-linear, but strongly associated:
+
+```{r nonlinear}
+set.seed(1)
+x_nl <- seq(-3, 3, length.out = 100)
+y_nl <- x_nl^2 + rnorm(100, sd = 0.5)
+
+tibble(x = x_nl, y = y_nl) |>
+  ggplot(aes(x, y)) +
+  geom_point(alpha = 0.6) +
+  labs(title = sprintf("y = x² + noise — r = %.3f (almost zero!)",
+                       cor(x_nl, y_nl)))
+```
+
+r can be zero even when y is a deterministic function of x.
+
+## Clusters create spurious r
+
+```{r cluster-r}
+set.seed(1)
+cluster_data <- tibble(
+  x = c(rnorm(50, 0,  1), rnorm(50, 10, 1)),
+  y = c(rnorm(50, 0,  1), rnorm(50, 10, 1))
+)
+
+ggplot(cluster_data, aes(x, y)) +
+  geom_point(alpha = 0.6) +
+  labs(title = sprintf("Two clusters → r = %.3f, but r within each cluster ≈ 0",
+                       cor(cluster_data$x, cluster_data$y)))
+```
+
+# §9.3 — Spearman correlation  *(book p. 472)*
+
+When the relationship is **monotonic but non-linear**, rank-transform first
+(Spearman's ρ).
+
+```{r spearman}
+# Create a strictly increasing but non-linear relationship
+x <- runif(100, 0, 10)
+y <- exp(x) + rnorm(100, sd = 100)   # exponential growth
+
+c(Pearson  = cor(x, y, method = "pearson"),
+  Spearman = cor(x, y, method = "spearman"))
+```
+
+Pearson is damaged by the curvature; Spearman captures the monotonic
+association directly.
+
+# §9.4 — Significance by simulation  *(book p. 477)*
+
+Under H0, x and y are independent. Shuffle y while keeping x fixed; recompute r.
+
+```{r cor-sig-sim}
+# A weak-to-moderate linear relationship
+n <- 50
+x <- rnorm(n)
+y <- 0.4 * x + rnorm(n, sd = sqrt(1 - 0.16))
+
+obs_r <- cor(x, y)
+obs_r
+
+n_sim <- 10000
+null_r <- numeric(n_sim)
+for (i in seq_len(n_sim)) {
+  null_r[i] <- cor(x, sample(y))    # shuffle y, recompute r
+}
+
+p_value <- mean(abs(null_r) >= abs(obs_r))
+p_value
+
+# Compare to the theoretical test
+cor.test(x, y)$p.value
+```
+
+```{r cor-null-plot}
+tibble(r = null_r) |>
+  ggplot(aes(r)) +
+  geom_histogram(bins = 60, fill = "grey70", color = "white") +
+  geom_vline(xintercept = c(-obs_r, obs_r),
+             color = "red", linewidth = 1) +
+  labs(title = "Null distribution of r from 10,000 label shuffles",
+       subtitle = sprintf("observed r = %.3f, p = %.4f", obs_r, p_value))
+```
+
+# §9.5 — Bootstrap confidence interval for r  *(book p. 482)*
+
+```{r r-ci}
+B <- 10000
+boot_r <- numeric(B)
+for (i in seq_len(B)) {
+  idx       <- sample(seq_along(x), length(x), replace = TRUE)
+  boot_r[i] <- cor(x[idx], y[idx])    # resample PAIRS
+}
+quantile(boot_r, c(0.025, 0.975))
+```
+
+Note the **paired resampling**: we resample `(x, y)` pairs so that the structure
+is preserved. Independently resampling x and y would break the correlation.
+
+# §9.6 — The interpretation of correlation  *(book p. 488)*
+
+The chapter's crucial point: **correlation does not imply causation**. Classic
+confounders generate spurious correlations.
+
+```{r confounder}
+# Both x and y driven by a common confounder z
+n <- 200
+z <- rnorm(n)              # hidden common cause (age, SES, calendar time...)
+x <- 2 * z + rnorm(n)
+y <- 3 * z + rnorm(n)
+
+cor(x, y)                  # Large, significant, entirely due to z
+```
+
+Without knowing `z`, we'd confidently claim `x → y`.
+
+# §9.7 — Only an experiment establishes causation  *(book §9.7 "Determining causation with an experiment", p. 493)*
+
+```{r experiment}
+# Randomize: now x is set by coin flip, not driven by z
+n <- 200
+z <- rnorm(n)
+x_random <- sample(c(0, 1), n, replace = TRUE)
+y <- 0.5 * x_random + 3 * z + rnorm(n)
+
+cor(x_random, y)  # smaller and "honest"
+```
+
+Random assignment breaks the link between `x` and every confounder `z`.
+
+# §9.8 — Mutual information: a non-linear alternative  *(book p. 496)*
+
+Mutual information measures **any** dependency, not just linear.
+
+```{r mi}
+# Rough MI via binned histograms. For production use, see the `infotheo` package.
+mutual_info <- function(x, y, n_bins = 10) {
+  # discretize into n_bins
+  bx <- cut(x, breaks = n_bins, labels = FALSE)
+  by <- cut(y, breaks = n_bins, labels = FALSE)
+
+  # joint and marginal probabilities
+  p_xy <- prop.table(table(bx, by))
+  p_x  <- prop.table(table(bx))
+  p_y  <- prop.table(table(by))
+
+  MI <- 0
+  for (i in seq_len(nrow(p_xy))) {
+    for (j in seq_len(ncol(p_xy))) {
+      if (p_xy[i, j] > 0) {
+        MI <- MI + p_xy[i, j] *
+          log(p_xy[i, j] / (p_x[i] * p_y[j]))
+      }
+    }
+  }
+  MI
+}
+
+# Non-linear data (the parabola): Pearson is ≈ 0, MI catches the dependence
+x_nl <- seq(-3, 3, length.out = 500)
+y_nl <- x_nl^2 + rnorm(500, sd = 0.3)
+
+tibble(
+  measure      = c("Pearson r", "Spearman ρ", "Mutual information"),
+  value        = c(cor(x_nl, y_nl),
+                   cor(x_nl, y_nl, method = "spearman"),
+                   mutual_info(x_nl, y_nl))
+)
+```
+
+MI > 0 even when r ≈ 0. The chapter discusses how to compare MI values across
+different mesh (bin) sizes and notes that — unlike r — MI is bounded by the
+entropy of the marginal, so normalization matters.
+
+# Exercises
+
+1. Replicate Anscombe's dataset #2 (the parabola) and compute MI with
+   `n_bins = 5`, `10`, `20`. How sensitive is MI to bin width?
+2. Simulate a confounded triangle (`z → x, z → y`) with `n = 30, 100, 1000`.
+   At which sample size does the spurious correlation become "significant" at
+   α = 0.01? What does that tell you about large-n observational studies?
+3. For the exponential example in §9.3, bootstrap CIs for both Pearson and
+   Spearman. Which is narrower, and why is that NOT a reason to prefer one?

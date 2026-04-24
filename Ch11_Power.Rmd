@@ -1,0 +1,212 @@
+---
+title: "Chapter 11 — Power (R companion)"
+subtitle: "R/tidyverse translation of *Understanding Data*"
+author: "Course notes"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 7, fig.height = 4, dpi = 120)
+library(tidyverse)
+set.seed(42)
+```
+
+# Orientation
+
+Chapter 11 (book pp. 557–594) defines **statistical power** — the probability
+of detecting a real effect of a given size. The book contains **no Python code
+listings** in this chapter. Most underpowered studies don't find what they
+should, and among underpowered studies that *do* find something, the effect
+is usually an exaggeration. This companion computes power by simulation
+(faithful to the book) and then via formulas.
+
+# §11.1 — Two kinds of errors  *(book §11.1 "The two types of errors", p. 559)*
+
+| Truth ↓ \ Decision → | Keep H₀ | Reject H₀          |
+|----------------------|---------|--------------------|
+| H₀ true              | ✓       | **Type I** (α)     |
+| H₀ false             | **Type II** (β) | ✓ (power = 1 − β)   |
+
+- **α (Type I rate)** — false alarm. Set by the analyst (commonly 0.05).
+- **β (Type II rate)** — missed real effect. We want this *small*.
+- **Power** = 1 − β = P(reject H₀ | H₀ is false).
+
+# §11.2 — Power by simulation  *(book §11.2 "How to calculate the power of a study?", p. 565)*
+
+**Procedure** (for a two-sample t-test):
+
+1. Pick a true effect size δ (e.g., mean difference of 0.3 SD).
+2. Simulate many experiments at a given sample size.
+3. Fraction of experiments where p < α is the power.
+
+```{r power-sim}
+simulate_power <- function(n_per_group, effect_size, alpha = 0.05,
+                           n_sim = 2000, sigma = 1) {
+  # In each iteration: simulate A and B, run t-test, record whether significant
+  significant <- logical(n_sim)
+  for (i in seq_len(n_sim)) {
+    A <- rnorm(n_per_group, mean = 0,           sd = sigma)
+    B <- rnorm(n_per_group, mean = effect_size, sd = sigma)
+    significant[i] <- t.test(A, B)$p.value < alpha
+  }
+  mean(significant)
+}
+
+# Example: 30 per group, effect = 0.5 SD (Cohen's "medium")
+simulate_power(n_per_group = 30, effect_size = 0.5)
+```
+
+Check against R's built-in:
+
+```{r pwr}
+library(pwr)   # install.packages("pwr")
+pwr.t.test(n = 30, d = 0.5, sig.level = 0.05,
+           type = "two.sample", alternative = "two.sided")$power
+```
+
+Simulation and formula agree to within Monte Carlo noise (expected).
+
+## §11.2 — Factors affecting power  *(book §11.2 "Factors affecting the power of a study", p. 571)*
+
+```{r power-grid, fig.width=8, fig.height=5}
+grid <- expand_grid(
+  n_per_group = c(10, 20, 40, 80, 160, 320),
+  effect_size = c(0.2, 0.5, 0.8)     # Cohen's d: small, medium, large
+) |>
+  rowwise() |>
+  mutate(power = simulate_power(n_per_group, effect_size, n_sim = 1000)) |>
+  ungroup()
+
+ggplot(grid, aes(n_per_group, power, color = factor(effect_size))) +
+  geom_line(linewidth = 1) + geom_point(size = 2) +
+  geom_hline(yintercept = 0.80, linetype = "dashed") +
+  scale_x_log10() +
+  labs(title = "Power vs sample size for three effect sizes (α = 0.05)",
+       subtitle = "Dashed line: conventional 80% power target",
+       x = "n per group (log)", y = "power",
+       color = "effect size")
+```
+
+Three lessons:
+- Larger samples → more power (`power ∝ √n` at fixed δ).
+- Larger effects → easier to detect.
+- Small effects (d = 0.2) need **huge** samples (n ≈ 400 per group for 80 % power).
+
+# §11.3 — A low-power study wrongly concluding "no effect"  *(book §11.3 "Was Bendectin use by pregnant women associated with an increased risk of birth defects?", p. 577)*
+
+The chapter uses the **Bendectin** controversy: an underpowered study found
+no increase in birth defects and was read as exonerating the drug. Let's
+simulate what that looks like.
+
+```{r bendectin}
+# Suppose the true relative risk is 1.3 (a real but modest harm).
+# A small study of 200 exposed + 200 unexposed may fail to detect it.
+
+simulate_bendectin <- function(n_exposed, n_unexposed,
+                               baseline_risk, true_rr, n_sim = 1000) {
+  significant <- logical(n_sim)
+  for (i in seq_len(n_sim)) {
+    exposed   <- rbinom(1, n_exposed,   baseline_risk * true_rr)
+    unexposed <- rbinom(1, n_unexposed, baseline_risk)
+    tab <- matrix(c(exposed,   n_exposed   - exposed,
+                    unexposed, n_unexposed - unexposed),
+                  nrow = 2, byrow = TRUE)
+    significant[i] <- chisq.test(tab)$p.value < 0.05
+  }
+  mean(significant)
+}
+
+# Baseline risk 3%, true RR 1.3
+simulate_bendectin(n_exposed = 200, n_unexposed = 200,
+                   baseline_risk = 0.03, true_rr = 1.3)
+```
+
+Power is embarrassingly low. The study "found nothing" because it couldn't
+find anything of that magnitude — not because nothing was there.
+
+```{r bendectin-growing}
+# With bigger samples, power rises
+tibble(
+  n = c(200, 500, 1000, 2000, 5000),
+  power = map_dbl(n, \(n) simulate_bendectin(n, n, 0.03, 1.3, n_sim = 500))
+)
+```
+
+**A null result is not evidence of no effect unless the power was high.**
+
+# §11.4 — Prospective power (sample-size planning)  *(book §11.4 "The prospective importance of power", p. 588)*
+
+The right question at design time: "what n do I need to detect δ at α and
+power 1 − β?"
+
+```{r pwr-planning}
+# What n per group gives 80% power to detect d = 0.5 at α = 0.05?
+pwr.t.test(d = 0.5, sig.level = 0.05, power = 0.80,
+           type = "two.sample")
+
+# By simulation:
+ns <- seq(30, 100, by = 5)
+powers <- map_dbl(ns, \(n) simulate_power(n, 0.5, n_sim = 1000))
+tibble(n = ns, power = powers)
+```
+
+Both approaches agree on ≈ 64 per group.
+
+# §11.5 — Power and the credibility of positive results  *(book §11.5 "Role of power in positive results", p. 589)*
+
+The "winner's curse": if your study was barely powered, a positive result is
+**biased upward** — the effect you measure is bigger than the true effect.
+
+```{r winners-curse}
+true_effect <- 0.3
+n_per_group <- 30            # this yields low power (~0.22)
+n_sim       <- 5000
+
+# Plain loop is faster and clearer than rowwise() with list columns
+p_values <- numeric(n_sim)
+d_hats   <- numeric(n_sim)
+for (i in seq_len(n_sim)) {
+  A <- rnorm(n_per_group, 0,           1)
+  B <- rnorm(n_per_group, true_effect, 1)
+  tt <- t.test(A, B)
+  p_values[i] <- tt$p.value
+  d_hats[i]   <- mean(B) - mean(A)
+}
+results <- tibble(p = p_values, d_hat = d_hats)
+
+# Average effect among ALL studies vs among "significant" studies
+tibble(
+  pool              = c("All studies", "Significant at p < 0.05"),
+  mean_measured_d   = c(mean(results$d_hat),
+                        mean(results$d_hat[results$p < 0.05]))
+)
+```
+
+Among all underpowered studies, the average measured effect equals the true
+effect (as it should). Among **published** studies (those that reached
+significance), it is inflated — often by 50–100 %.
+
+```{r winners-curse-plot}
+ggplot(results, aes(d_hat, fill = p < 0.05)) +
+  geom_histogram(bins = 60, alpha = 0.7) +
+  geom_vline(xintercept = true_effect, linetype = "dashed") +
+  labs(title = "Winner's curse: only extreme estimates reach significance",
+       subtitle = "Dashed line: true effect (0.3). Blue: p < 0.05 → publication bias.",
+       x = "measured effect", y = "count", fill = "p < 0.05")
+```
+
+# Exercises
+
+1. Replicate the grid plot with α = 0.01 and α = 0.001. How much larger must
+   samples be to recover the same 80 % power?
+2. Simulate a chi-square power analysis: true OR = 2, baseline risk 0.1.
+   What `n` per arm is needed for 80 % power?
+3. Run the winner's curse simulation with `n_per_group = 200` (high power).
+   Is the publication bias still present? At what power level does it vanish?

@@ -1,0 +1,246 @@
+---
+title: "Chapter 12 — Bayesian Statistics (R companion)"
+subtitle: "R/tidyverse translation of *Understanding Data*"
+author: "Course notes"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 7, fig.height = 4, dpi = 120)
+library(tidyverse)
+set.seed(42)
+```
+
+# Orientation
+
+Chapter 12 (book pp. 595–665) is the paradigm shift. The book contains **no
+Python code listings** in this chapter. The p-value answers *P(data | H₀)* —
+the probability of the data if the null is true. What clinicians, policy
+makers, and scientists actually want is *P(H | data)* — the probability the
+hypothesis is true given the data. **Bayes' theorem gets you the second
+from the first.** *(Book §12.1 "Answering the wrong question", p. 595.)*
+
+# §12.2 — Positive Predictive Value: the disease-test example  *(book §12.2 "Positive Predictive Value in medicine and social science", p. 597)*
+
+## The setup
+
+A diagnostic test is 99 % sensitive and 99 % specific. A patient tests positive.
+What's the probability they actually have the disease?
+
+```{r ppv-setup}
+sensitivity <- 0.99        # P(test+ | disease)
+specificity <- 0.99        # P(test− | no disease)
+prevalence  <- 0.001       # 1 in 1000 has the disease
+```
+
+Most people (even doctors) guess ~90 %. The correct answer is much smaller.
+
+## Graphical approach: the natural frequency tree  *(book §12.2 "Graphical approaches", p. 602)*
+
+```{r ppv-natural-frequencies}
+N          <- 100000       # think about 100,000 people
+disease    <- N * prevalence                    # 100 sick
+no_disease <- N - disease                       # 99,900 healthy
+
+true_pos   <- disease    * sensitivity          # 99 sick test+
+false_neg  <- disease    * (1 - sensitivity)    # 1 sick test−
+false_pos  <- no_disease * (1 - specificity)    # 999 healthy test+
+true_neg   <- no_disease * specificity          # 98,901 healthy test−
+
+# PPV = P(disease | test+) = true positives / all positives
+PPV <- true_pos / (true_pos + false_pos)
+PPV
+```
+
+**Only about 9 %** of people who test positive actually have the disease.
+The specificity is "high" but the false positives (999) overwhelm the true
+positives (99) because the healthy population is so much larger.
+
+```{r ppv-plot, fig.width=8, fig.height=4}
+tibble(
+  category = c("True +", "False +", "True −", "False −"),
+  count    = c(true_pos, false_pos, true_neg, false_neg),
+  test     = c("positive", "positive", "negative", "negative")
+) |>
+  ggplot(aes(category, count, fill = test)) +
+  geom_col() +
+  scale_y_log10() +
+  labs(title = sprintf("Screening 100,000 at prevalence = %.1f%%", 100*prevalence),
+       subtitle = sprintf("PPV = %.1f%% (not the 99% intuition suggests)",
+                          100*PPV),
+       y = "count (log scale)")
+```
+
+## The prosecutor's fallacy  *(book §12.2, p. 608)*
+
+This is the same error in legal language: **P(evidence | innocent)** is NOT
+**P(innocent | evidence)**. An expert who testifies "this evidence would occur
+in only 1 in a million innocent people" is answering the wrong question — and
+if 10 million innocents were screened, 10 false matches are expected.
+
+# §12.3 — Bayes' theorem  *(book p. 613)*
+
+$$P(H \mid D) = \frac{P(D \mid H) \cdot P(H)}{P(D)}$$
+
+```{r bayes-function}
+bayes_update <- function(prior, likelihood_H, likelihood_notH) {
+  # P(H | D) = P(D|H) P(H) / [P(D|H) P(H) + P(D|¬H) P(¬H)]
+  numerator   <- likelihood_H   * prior
+  denominator <- numerator + likelihood_notH * (1 - prior)
+  numerator / denominator
+}
+
+# Disease example
+bayes_update(prior = 0.001, likelihood_H = 0.99, likelihood_notH = 0.01)
+# Same answer as the natural-frequency tree above
+```
+
+## Bayesian updating: incorporating new evidence  *(book §12.3 "Bayes as updating", p. 617)*
+
+Each new test result *updates* the prior. Yesterday's posterior becomes
+today's prior.
+
+```{r sequential-updating}
+# Start with base-rate prior 0.001; patient then takes two independent tests.
+p_current <- 0.001
+
+for (test_result in c("positive", "positive")) {
+  L_H    <- ifelse(test_result == "positive", 0.99, 0.01)
+  L_notH <- ifelse(test_result == "positive", 0.01, 0.99)
+  p_current <- bayes_update(p_current, L_H, L_notH)
+  cat("After a", test_result, "result, P(disease) =", signif(p_current, 3), "\n")
+}
+```
+
+Two independent positives push the posterior from 0.001 → 0.09 → **≈ 0.91**.
+*That* is the 99 % figure the naïve reading imagines.
+
+# §12.4 — Bayes in clinical trials  *(book §12.4 "Bayes and Clinical trials", p. 643)*
+
+The chapter contrasts p-value hypothesis testing with a Bayesian analysis for
+a clinical trial where we want P(drug works | data).
+
+```{r clinical-bayes, fig.width=7, fig.height=4}
+# Simple Beta-Binomial model
+# Observed: 18 of 30 patients improved under the new drug
+improved <- 18
+n        <- 30
+
+# Prior: Beta(1, 1) is uniform — "no prior opinion on efficacy"
+prior_alpha <- 1
+prior_beta  <- 1
+
+# Posterior (conjugate update): Beta(α + x, β + n − x)
+post_alpha <- prior_alpha + improved
+post_beta  <- prior_beta  + (n - improved)
+
+# P(response_rate > 0.5 | data) — probability the drug is more effective than a coin flip
+prob_better_than_half <- 1 - pbeta(0.5, post_alpha, post_beta)
+prob_better_than_half
+
+# 95% credible interval (NOT a confidence interval — see interpretation below)
+ci_credible <- qbeta(c(0.025, 0.975), post_alpha, post_beta)
+ci_credible
+```
+
+```{r bayes-plot}
+theta <- seq(0, 1, 0.001)
+tibble(
+  theta     = theta,
+  prior     = dbeta(theta, prior_alpha, prior_beta),
+  posterior = dbeta(theta, post_alpha, post_beta)
+) |>
+  pivot_longer(c(prior, posterior), names_to = "dist", values_to = "density") |>
+  ggplot(aes(theta, density, color = dist)) +
+  geom_line(linewidth = 1) +
+  geom_vline(xintercept = 0.5, linetype = "dashed") +
+  labs(title = "Prior vs posterior for the response rate θ",
+       subtitle = sprintf("Observed: %d/%d.  P(θ > 0.5 | data) = %.3f",
+                          improved, n, prob_better_than_half),
+       x = "θ = true response rate", y = "density")
+```
+
+## Credible interval vs confidence interval — the crucial difference
+
+- **Confidence interval** (Ch. 4): *a 95 % CI is a procedure such that, over
+  many repetitions, 95 % of intervals will contain the true parameter.* It is
+  NOT a probability statement about this particular interval.
+
+- **Credible interval**: *given these data, there is a 95 % probability the
+  true parameter lies in this interval.*
+
+The second is what everyone wants the first to mean. The Bayesian definition
+delivers it directly — at the cost of requiring a prior.
+
+# §12.5 — Why most published findings may be wrong  *(book §12.5 "Bayes' Theorem and the problem of unreliable results", p. 656)*
+
+A famous Ioannidis-style exercise: even with α = 0.05 and 80 % power,
+**most published positive findings may be false** if the prior probability
+that the tested hypothesis is true is low.
+
+```{r ioannidis}
+# Suppose we test many hypotheses, only 10% of which are true
+prior_true <- 0.10
+alpha      <- 0.05      # Type I rate
+power      <- 0.80      # 1 − β
+
+# P(hypothesis true | positive result) by Bayes
+prob_true_given_positive <- bayes_update(
+  prior          = prior_true,
+  likelihood_H   = power,    # true positives
+  likelihood_notH = alpha    # false positives
+)
+prob_true_given_positive
+```
+
+**Only ~64 %** of published "significant" findings are true under these
+generous assumptions. Lower the prior (exploratory fishing), lower the power
+(small studies), and this drops further:
+
+```{r ioannidis-grid, fig.width=8, fig.height=4}
+grid <- expand_grid(
+  prior = c(0.01, 0.10, 0.30, 0.50),
+  power = c(0.20, 0.50, 0.80)
+) |>
+  mutate(ppv = pmap_dbl(list(prior, power),
+                        \(p, pw) bayes_update(p, pw, 0.05)))
+
+ggplot(grid, aes(power, ppv, color = factor(prior))) +
+  geom_line(linewidth = 1) + geom_point(size = 3) +
+  labs(title = "Post-study probability a 'significant' finding is real",
+       subtitle = "At α = 0.05, varies strongly with prior and power",
+       x = "power (1 − β)", y = "P(true | positive)",
+       color = "prior P(H true)")
+```
+
+# The paradigm shift  *(companion synthesis of Ch. 12)*
+
+The book ends with a summary:
+
+- **Frequentism**: probability = long-run frequency. Parameters are fixed.
+  Procedures calibrated so that error rates (α, β) are controlled across
+  hypothetical replications.
+- **Bayesianism**: probability = degree of belief. Parameters have
+  distributions. Evidence updates belief via Bayes' theorem.
+
+The two agree on many numerical results but differ on the *meaning* of those
+numbers — and only Bayes answers the question people most want answered.
+
+# Exercises
+
+1. Repeat the disease-test calculation with prevalence 1/100 (instead of
+   1/1000). How does PPV change? What does this say about screening programs
+   in high- vs low-prevalence populations?
+2. With prior Beta(1, 1), observed 18/30 improvements: compute the posterior
+   probability the drug beats a placebo with a 40 % response rate. Repeat with
+   an informative prior Beta(20, 20) (strong belief in 50 %). How much does
+   the prior matter?
+3. Implement Ioannidis's PPV formula algebraically: `PPV = (1−β)R / ((1−β)R + α)`,
+   where `R = prior / (1 − prior)`. Verify it against `bayes_update()`.

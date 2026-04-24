@@ -1,0 +1,225 @@
+---
+title: "Chapter 2 — Describing and Presenting Data (R companion)"
+subtitle: "R/tidyverse translation of *Understanding Data*"
+author: "Course notes"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 6.5, fig.height = 4, dpi = 120)
+library(tidyverse)
+library(ggbeeswarm)   # install.packages("ggbeeswarm")
+library(patchwork)    # install.packages("patchwork")
+set.seed(1)
+```
+
+# Orientation
+
+Chapter 2 (book pp. 23–102) is about **looking at data** before testing anything.
+The core claim: summary statistics (mean, SD) hide the structure that dot plots,
+histograms, and KDEs reveal. The book contains **no Python code listings** in this
+chapter, only figures. This companion reproduces every visualization style the
+chapter discusses, then shows the mechanical definitions of mean, median, SD, SEM,
+IQR, etc., with small worked examples.
+
+# A running data set
+
+Throughout the chapter, simulated biological measurements (e.g., T-cell counts)
+are used. We'll construct a similar example: two groups, 30 observations each,
+drawn from distributions that look different but have similar means.
+
+```{r make-data}
+n <- 30
+df <- tibble(
+  group = rep(c("Control", "Treatment"), each = n),
+  value = c(
+    rnorm(n, mean = 10, sd = 2),                  # Control: tight, symmetric
+    c(rnorm(n - 3, mean = 9, sd = 1.2),           # Treatment: mostly tight
+      rnorm(3, mean = 16, sd = 0.5))              # ...with 3 high outliers
+  )
+)
+head(df)
+```
+
+# §2.1 — Dot plots and beeswarm plots  *(book p. 25)*
+
+Chapter rule: **show every observation**.
+
+```{r dotplot}
+ggplot(df, aes(x = group, y = value)) +
+  geom_jitter(width = 0.1, height = 0, alpha = 0.7) +
+  labs(title = "Dot plot: each dot is one observation",
+       x = NULL, y = "measurement")
+```
+
+```{r beeswarm}
+ggplot(df, aes(x = group, y = value)) +
+  geom_beeswarm(cex = 2, alpha = 0.7) +
+  labs(title = "Beeswarm plot: non-overlapping arrangement reveals density",
+       x = NULL, y = "measurement")
+```
+
+The beeswarm makes it obvious that the Treatment group has a small high-value
+tail — something a mean would wash out.
+
+# §2.2 — Histograms and kernel density estimates  *(book p. 33)*
+
+## Histograms
+
+```{r histograms}
+ggplot(df, aes(value, fill = group)) +
+  geom_histogram(binwidth = 1, color = "white",
+                 position = "identity", alpha = 0.5) +
+  labs(title = "Histograms: shape depends strongly on bin width",
+       x = "measurement", y = "count")
+```
+
+**Try different bin widths** — this is the chapter's warning:
+
+```{r bin-sensitivity, fig.width=9, fig.height=3}
+bw_examples <- c(0.3, 1, 3)
+map(bw_examples, \(bw) {
+  ggplot(df, aes(value, fill = group)) +
+    geom_histogram(binwidth = bw, color = "white",
+                   position = "identity", alpha = 0.5) +
+    labs(title = paste("binwidth =", bw), x = NULL, y = NULL) +
+    theme(legend.position = "none")
+}) |> patchwork::wrap_plots(nrow = 1)
+```
+
+## Kernel density estimates
+
+```{r kde}
+ggplot(df, aes(value, fill = group, color = group)) +
+  geom_density(alpha = 0.3) +
+  labs(title = "Kernel density estimate (Gaussian kernel, default bandwidth)",
+       x = "measurement", y = "density")
+```
+
+The book warns that **bandwidth matters as much as bin width did**:
+
+```{r kde-bandwidth, fig.width=9, fig.height=3}
+bws <- c(0.3, 1, 3)
+map(bws, \(b) {
+  ggplot(df, aes(value, color = group)) +
+    geom_density(bw = b) +
+    labs(title = paste("bw =", b), x = NULL, y = NULL) +
+    theme(legend.position = "none")
+}) |> patchwork::wrap_plots(nrow = 1)
+```
+
+# §2.3 — Measures of central tendency  *(book p. 61)*
+
+Build them from scratch so the definitions are not black boxes.
+
+```{r central}
+x <- df$value[df$group == "Treatment"]
+
+# Mean: Σx / n
+manual_mean   <- sum(x) / length(x)
+
+# Median: middle of the sorted sample (or mean of two middles)
+sorted_x <- sort(x)
+m <- length(sorted_x)
+manual_median <- if (m %% 2 == 1) sorted_x[(m + 1) / 2]
+                 else mean(sorted_x[c(m/2, m/2 + 1)])
+
+# Mode: the "most common" value — for continuous data, peak of the KDE
+d <- density(x)
+manual_mode <- d$x[which.max(d$y)]
+
+c(manual_mean = manual_mean, builtin_mean = mean(x),
+  manual_median = manual_median, builtin_median = median(x),
+  approx_mode = manual_mode)
+```
+
+## The "Flaw of Averages"  *(book §2.3, p. 66)*
+
+A classic example: a river with mean depth 1 m can still drown you if it's 0.3 m
+most places and 4 m in one spot.
+
+```{r flaw-of-averages}
+river <- c(rep(0.3, 19), 4.0)   # 20 depth readings
+mean(river)                      # Mean depth = 0.485 m
+max(river)                       # Maximum depth = 4 m — the mean is misleading
+```
+
+# §2.4 — Measures of variability  *(book p. 77)*
+
+```{r variability}
+# Variance and SD using the classical n−1 denominator
+manual_var <- sum((x - mean(x))^2) / (length(x) - 1)
+c(manual_var = manual_var, builtin_var = var(x),
+  manual_sd  = sqrt(manual_var), builtin_sd = sd(x))
+
+# Standard error of the mean: SD / sqrt(n)
+sem <- sd(x) / sqrt(length(x))
+sem
+
+# Median absolute deviation — robust alternative
+mad_x <- median(abs(x - median(x)))
+c(manual_mad = mad_x, builtin_mad = mad(x, constant = 1))
+
+# IQR and range
+quantile(x, c(0.25, 0.75))
+IQR(x)
+range(x)
+diff(range(x))
+```
+
+# §2.5 — Presentation: show the data  *(book p. 84)*
+
+The chapter is scathing about bar graphs with error bars ("dynamite plunger plots",
+book §2.5, p. 93) because they hide the distribution. Compare:
+
+```{r bar-vs-points, fig.width=9, fig.height=4}
+summary_df <- df |>
+  group_by(group) |>
+  summarise(mean = mean(value),
+            sem  = sd(value) / sqrt(n()), .groups = "drop")
+
+bad <- ggplot(summary_df, aes(group, mean)) +
+  geom_col(fill = "steelblue", width = 0.5) +
+  geom_errorbar(aes(ymin = mean - sem, ymax = mean + sem), width = 0.1) +
+  labs(title = "Bad: 'Dynamite plunger' bar graph — hides the distribution",
+       x = NULL, y = "value")
+
+good <- ggplot(df, aes(group, value)) +
+  geom_beeswarm(alpha = 0.6) +
+  stat_summary(fun = mean, geom = "crossbar",
+               width = 0.4, color = "red") +
+  labs(title = "Good: beeswarm + mean crossbar — every observation visible",
+       x = NULL, y = "value")
+
+patchwork::wrap_plots(bad, good, nrow = 1)
+```
+
+Box plots are acceptable but still hide modality:
+
+```{r boxplot}
+ggplot(df, aes(group, value)) +
+  geom_boxplot(width = 0.3, outlier.shape = NA) +
+  geom_beeswarm(alpha = 0.5, cex = 2, color = "steelblue") +
+  labs(title = "Box plot + beeswarm: summary plus the full data",
+       x = NULL, y = "value")
+```
+
+This is the layout the chapter recommends: a summary layer on top of a plot that
+shows every observation.
+
+# Exercises for students
+
+1. Change `set.seed(1)` to your student ID. Regenerate the beeswarm. Is the 3-outlier
+   pattern in the Treatment group still visible? Explain why a bar graph would fail
+   to reveal it.
+2. Replace `binwidth = 1` in the first histogram with `bins = 5`, `bins = 30`, and
+   `bins = 100`. Which bin count best represents the underlying distribution?
+3. Use `rlnorm(50, meanlog = 0, sdlog = 1)` to generate a skewed sample. Compare the
+   mean, median, and mode. Which one best describes a "typical" value?

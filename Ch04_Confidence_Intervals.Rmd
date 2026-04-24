@@ -1,0 +1,191 @@
+---
+title: "Chapter 4 — Confidence Intervals (R companion)"
+subtitle: "R/tidyverse translation of *Understanding Data*"
+author: "Course notes"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 6.5, fig.height = 4, dpi = 120)
+library(tidyverse)
+set.seed(42)
+```
+
+# Orientation
+
+Chapter 4 (book pp. 153–186) defines the confidence interval by **resampling**
+(the bootstrap), not by formula. That's pedagogically beautiful: every step is
+transparent. The book contains **no Python code listings** in this chapter.
+We translate the chapter's "10,000 (virtual) friends" analogy (§4.2, p. 162) into
+a for-loop first, then show the idiomatic one-liner.
+
+# §4.1 — The idea  *(book p. 153)*
+
+We have **one sample** `X` from some unknown population `U`. We'd love to know
+the true mean μ, but we only see `X̄` (the sample mean).
+
+**Insight:** if we had 10,000 sister samples, we could see how `X̄` varies
+across them. We don't. But **bootstrapping treats `X` as a stand-in for `U`**
+and resamples from `X` itself, with replacement.
+
+# §4.2 — The bootstrap, written out  *(book p. 160)*
+
+## Set up the observed sample
+
+The chapter uses a biological example; we use an analogous one.
+
+```{r one-sample}
+# One observed sample: 30 measurements
+observed_X <- c(12.1, 10.8, 11.5,  9.9, 11.0, 10.6, 12.3, 11.7, 10.2, 11.1,
+                10.9, 11.8, 10.5, 11.2, 12.0, 10.7, 11.4, 11.6,  9.8, 10.4,
+                11.3, 10.0, 11.9, 12.2, 10.3,  9.7, 11.0, 10.8, 11.5, 10.9)
+n <- length(observed_X)
+obs_mean <- mean(observed_X)
+obs_mean
+```
+
+## The faithful loop
+
+```{r bootstrap-loop}
+n_resamples <- 10000
+boot_means  <- numeric(n_resamples)
+
+for (i in seq_len(n_resamples)) {
+  # "Put 10,000 virtual friends back into X" — sample with replacement
+  resample_i       <- sample(observed_X, size = n, replace = TRUE)
+  boot_means[i]    <- mean(resample_i)
+}
+
+# Same thing, idiomatic R (one line):
+# boot_means <- replicate(n_resamples, mean(sample(observed_X, n, replace = TRUE)))
+```
+
+## Construct the 95 % confidence interval
+
+```{r construct-ci}
+ci_95 <- quantile(boot_means, probs = c(0.025, 0.975))
+ci_95
+```
+
+So our 95 % CI for the population mean μ is roughly `[ci_95[1], ci_95[2]]`.
+
+```{r plot-boot, fig.width=7, fig.height=4}
+tibble(boot_mean = boot_means) |>
+  ggplot(aes(boot_mean)) +
+  geom_histogram(bins = 40, fill = "steelblue", color = "white") +
+  geom_vline(xintercept = obs_mean, color = "red", linewidth = 1) +
+  geom_vline(xintercept = ci_95, color = "red",
+             linetype = "dashed") +
+  labs(title = "Bootstrap distribution of the sample mean",
+       subtitle = "Solid: observed mean.  Dashed: 2.5th and 97.5th percentiles (95% CI)",
+       x = "Bootstrap mean", y = "Frequency")
+```
+
+# §4.3 — Worked example  *(book p. 168)*
+
+Compare the bootstrap CI with the textbook t-interval:
+
+```{r compare-t}
+t_interval <- t.test(observed_X)$conf.int
+tibble(
+  method = c("Bootstrap", "t-distribution"),
+  lower  = c(ci_95[1], t_interval[1]),
+  upper  = c(ci_95[2], t_interval[2])
+)
+```
+
+They agree closely because this sample is roughly Normal.
+For skewed or small samples they diverge — the bootstrap is more honest about
+the asymmetry.
+
+# §4.4 — Bigger sample, tighter CI  *(book p. 172)*
+
+The CI width should shrink as √n.
+
+```{r width-vs-n, fig.width=7, fig.height=4}
+# Vary n and bootstrap the CI
+pop <- rnorm(100000, mean = 11, sd = 1)  # pretend this is the population
+
+ci_width_for_n <- function(n, B = 2000) {
+  samp       <- sample(pop, n)
+  boot_means <- replicate(B, mean(sample(samp, n, replace = TRUE)))
+  diff(quantile(boot_means, c(0.025, 0.975)))
+}
+
+widths <- tibble(
+  n       = c(10, 20, 50, 100, 200, 500, 1000),
+  width   = map_dbl(n, ci_width_for_n)
+)
+
+ggplot(widths, aes(n, width)) +
+  geom_line() + geom_point() +
+  scale_x_log10() + scale_y_log10() +
+  labs(title = "CI width shrinks like 1/√n",
+       x = "Sample size n (log)", y = "95% CI width (log)")
+```
+
+Slope ≈ −0.5 on this log-log plot confirms the √n rule.
+
+# §4.5 — Validating the resampling principle  *(book p. 177)*
+
+Does a 95 % CI actually contain the true mean 95 % of the time? Let's check.
+
+```{r coverage}
+true_mu <- 11                     # known population mean
+n        <- 30
+n_trials <- 1000                  # repeat the whole experiment 1000 times
+B        <- 500                   # bootstrap replicates per trial
+
+captured <- logical(n_trials)
+for (t in seq_len(n_trials)) {
+  sample_t   <- rnorm(n, mean = true_mu, sd = 1)
+  boot_means <- replicate(B, mean(sample(sample_t, n, replace = TRUE)))
+  ci         <- quantile(boot_means, c(0.025, 0.975))
+  captured[t] <- (ci[1] <= true_mu) && (true_mu <= ci[2])
+}
+mean(captured)  # should be ≈ 0.95
+```
+
+# §4.6–4.7 — Other definitions & formulas  *(book p. 180)*
+
+For the record, the textbook Normal-based formula is:
+
+```{r formula-ci}
+X_bar <- mean(observed_X)
+SE    <- sd(observed_X) / sqrt(length(observed_X))
+t_critical <- qt(0.975, df = length(observed_X) - 1)
+
+lower <- X_bar - t_critical * SE
+upper <- X_bar + t_critical * SE
+c(lower = lower, upper = upper)
+```
+
+This agrees with `t.test()$conf.int`. It requires the Normality assumption; the
+bootstrap does not.
+
+# §4.8–4.9 — How to present and interpret a CI  *(book pp. 181–182)*
+
+**Report:** `mean = 11.02 (95% CI 10.74 to 11.30)`.
+
+**Interpret, correctly:** "If we repeated this experiment many times, 95 % of
+such intervals would contain the true population mean."
+
+**Do NOT say:** "There is a 95 % probability the true mean is between
+10.74 and 11.30." That's a Bayesian statement (see Chapter 12).
+
+# Exercises
+
+1. Replace `observed_X` with `rexp(30, rate = 0.1)` (exponential, heavily skewed).
+   Compare the bootstrap CI to `t.test()$conf.int`. Which one gives an asymmetric
+   interval? Why is that more honest?
+2. Run the coverage simulation (§4.5) with `n = 5`. Is the bootstrap still ≈ 95 %?
+   Why might it under-cover for very small samples?
+3. Implement the **percentile bootstrap** (shown here) and the **basic
+   bootstrap** `2·θ̂ − q₁₋α/₂, 2·θ̂ − q_{α/2}`. Compare.

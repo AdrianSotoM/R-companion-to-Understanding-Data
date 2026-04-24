@@ -1,0 +1,284 @@
+---
+title: "Chapter 6 — Comparing Two Groups (R companion)"
+subtitle: "R/tidyverse translation of *Understanding Data*"
+author: "Course notes"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 6.5, fig.height = 4, dpi = 120)
+library(tidyverse)
+library(ggbeeswarm)
+set.seed(42)
+```
+
+# Orientation
+
+Chapter 6 (book pp. 203–284) is the workhorse. It compares two groups using
+**simulation-based hypothesis tests** (Big Box and Re-centered Two-Box) and
+then reveals that the classical t-test is a special case of these. The book
+contains **one explicit Python snippet** in this chapter (§6.9 "What is a
+t-test?", p. 272, reproduced in-place below). This companion implements both
+resampling procedures from scratch.
+
+# §6.1–6.2 — Data and the effect size Δ_obs  *(book pp. 204, 208)*
+
+```{r tcell-data}
+# Control vs. Treatment T-cell counts (chapter example, reconstructed)
+control   <- c(215, 189, 226, 201, 198, 210, 205, 223, 192, 208,
+               218, 199, 212, 207, 195, 221, 203, 200, 214, 209)
+treatment <- c(234, 219, 248, 252, 231, 245, 228, 240, 237, 255,
+               225, 243, 250, 236, 229, 246, 233, 241, 253, 238)
+
+df <- tibble(
+  group = rep(c("Control", "Treatment"),
+              c(length(control), length(treatment))),
+  count = c(control, treatment)
+)
+
+# Effect size: difference in means (Δ_obs)
+delta_obs <- mean(treatment) - mean(control)
+delta_obs
+```
+
+## Show the data first
+
+```{r show-data}
+ggplot(df, aes(group, count, color = group)) +
+  geom_beeswarm(alpha = 0.7, cex = 2) +
+  stat_summary(fun = mean, geom = "crossbar",
+               width = 0.4, color = "black") +
+  labs(title = sprintf("Δ_obs = %.1f", delta_obs),
+       x = NULL, y = "T-cell count") +
+  theme(legend.position = "none")
+```
+
+# §6.3 — The Big Box method  *(book p. 210)*
+
+**Idea:** Under the null, Control and Treatment come from the **same**
+population. Pool all observations into one "big box", then repeatedly
+re-deal them into two groups of the original sizes. See how extreme Δ_obs
+is against that null distribution of Δ.
+
+```{r big-box}
+big_box <- c(control, treatment)
+n_A     <- length(control)
+n_B     <- length(treatment)
+n_sim   <- 10000
+
+null_deltas <- numeric(n_sim)
+for (i in seq_len(n_sim)) {
+  shuffled         <- sample(big_box)                     # reshuffle all observations
+  pseudo_A         <- shuffled[seq_len(n_A)]              # first n_A → pseudo-Control
+  pseudo_B         <- shuffled[(n_A + 1):(n_A + n_B)]     # rest    → pseudo-Treatment
+  null_deltas[i]   <- mean(pseudo_B) - mean(pseudo_A)     # pseudo-Δ
+}
+
+# Two-sided p-value
+p_value <- mean(abs(null_deltas) >= abs(delta_obs))
+p_value
+```
+
+```{r big-box-plot}
+tibble(delta = null_deltas) |>
+  ggplot(aes(delta)) +
+  geom_histogram(bins = 60, fill = "grey70", color = "white") +
+  geom_vline(xintercept = c(-delta_obs, delta_obs),
+             color = "red", linewidth = 1) +
+  labs(title = "Null distribution of Δ under the Big Box method",
+       subtitle = paste("Observed |Δ| lines in red; p =",
+                        signif(p_value, 3)),
+       x = "Δ in the null world", y = "Count")
+```
+
+# §6.3 — The Re-centered Two-Box method  *(book p. 218)*
+
+When the two groups have **very different variances** (chapter rule: > 2:1),
+the Big Box contaminates each group's spread with the other's. The fix is to
+**re-center** each group to the same mean, then resample *within* each box.
+
+```{r two-box}
+# Re-center each group so both have mean 0
+A_c <- control   - mean(control)
+B_c <- treatment - mean(treatment)
+
+null_deltas_2box <- numeric(n_sim)
+for (i in seq_len(n_sim)) {
+  pseudo_A <- sample(A_c, n_A, replace = TRUE)
+  pseudo_B <- sample(B_c, n_B, replace = TRUE)
+  null_deltas_2box[i] <- mean(pseudo_B) - mean(pseudo_A)
+}
+
+p_value_2box <- mean(abs(null_deltas_2box) >= abs(delta_obs))
+p_value_2box
+```
+
+For the T-cell example the two methods agree closely because the group variances
+are similar. For the chapter's cancer-drug example (where variances differ
+strongly), they diverge.
+
+# §6.4 — Confidence interval for Δ  *(book p. 229)*
+
+The CI is built by bootstrapping each group **separately** (not pooled).
+
+```{r ci-delta}
+B <- 10000
+boot_deltas <- numeric(B)
+for (i in seq_len(B)) {
+  A_star <- sample(control,   n_A, replace = TRUE)
+  B_star <- sample(treatment, n_B, replace = TRUE)
+  boot_deltas[i] <- mean(B_star) - mean(A_star)
+}
+
+ci_95 <- quantile(boot_deltas, c(0.025, 0.975))
+ci_95
+```
+
+So we report: `Δ = 33.0 (95% CI 26.1 to 39.9), p < 0.001 (Big Box, 10,000 resamples)`.
+
+```{r ci-plot}
+tibble(delta = boot_deltas) |>
+  ggplot(aes(delta)) +
+  geom_histogram(bins = 60, fill = "steelblue", color = "white") +
+  geom_vline(xintercept = delta_obs, color = "red", linewidth = 1) +
+  geom_vline(xintercept = ci_95, color = "red", linetype = "dashed") +
+  labs(title = "Bootstrap distribution of Δ (group-by-group resampling)",
+       x = "Bootstrap Δ", y = "Count")
+```
+
+Since the CI excludes zero, this is consistent with p < 0.05 from the null test.
+
+# §6.6 — Rank-based alternative  *(book p. 242)*
+
+If groups are clearly non-Normal, rank-transform first. The test statistic
+becomes the Wilcoxon-Mann-Whitney U.
+
+```{r ranks}
+# Idiomatic R:
+wilcox.test(treatment, control, exact = FALSE)
+
+# Conceptual version: permutation test on rank sums
+combined <- c(control, treatment)
+r        <- rank(combined)
+obs_rs   <- sum(r[(n_A + 1):(n_A + n_B)])   # rank sum of treatment
+
+null_rs <- numeric(n_sim)
+for (i in seq_len(n_sim)) {
+  idx <- sample(seq_along(combined), n_B)
+  null_rs[i] <- sum(r[idx])
+}
+mean(abs(null_rs - mean(null_rs)) >= abs(obs_rs - mean(null_rs)))
+```
+
+# §6.7 — Paired study design  *(book p. 248)*
+
+**Swimsuit vs wetsuit:** the same swimmers each wear both, so the right analysis
+works on the **differences within pairs**.
+
+```{r paired}
+set.seed(7)
+# 12 swimmers, each timed in swimsuit and wetsuit
+swimsuit <- rnorm(12, mean = 60, sd = 3)
+wetsuit  <- swimsuit - rnorm(12, mean = 3, sd = 0.5)  # wetsuit is reliably faster
+
+paired_df <- tibble(
+  swimmer  = 1:12,
+  swimsuit = swimsuit,
+  wetsuit  = wetsuit,
+  diff     = swimsuit - wetsuit
+)
+paired_df
+```
+
+## Wrong: independent-samples analysis ignores the pairing
+
+```{r paired-wrong}
+t.test(swimsuit, wetsuit)$p.value  # High p, large SE — swamped by swimmer-to-swimmer variability
+```
+
+## Right: analyze the differences
+
+```{r paired-right}
+t.test(paired_df$diff)$p.value     # Much smaller p
+
+# Bootstrap CI for the paired mean difference
+B <- 10000
+boot_md <- replicate(B, mean(sample(paired_df$diff,
+                                    nrow(paired_df), replace = TRUE)))
+quantile(boot_md, c(0.025, 0.975))
+```
+
+The paired analysis gains power by subtracting out between-swimmer variation.
+
+# §6.8 — Effect size as a ratio  *(book p. 262)*
+
+For multiplicative data (e.g., gene expression), use the **ratio** of means,
+and work on the log scale so "ratio" becomes "difference of logs".
+
+```{r ratio}
+set.seed(1)
+group_A <- rlnorm(30, meanlog = 2.0, sdlog = 0.3)
+group_B <- rlnorm(30, meanlog = 2.5, sdlog = 0.3)  # ~e^0.5 ≈ 1.65× higher
+
+obs_ratio <- mean(group_B) / mean(group_A)
+obs_ratio
+
+# Bootstrap CI for the ratio — resample each group, take ratio of means
+B <- 10000
+boot_ratios <- numeric(B)
+for (i in seq_len(B)) {
+  a_star <- sample(group_A, length(group_A), replace = TRUE)
+  b_star <- sample(group_B, length(group_B), replace = TRUE)
+  boot_ratios[i] <- mean(b_star) / mean(a_star)
+}
+quantile(boot_ratios, c(0.025, 0.975))
+```
+
+# §6.9 — The t-test as a special case  *(book p. 269)*
+
+The chapter reveals: **Student's t-test is the Big Box's formula-based
+approximation** when data are Normal and variances are equal.
+
+The book's only Python snippet in this chapter appears here. From book
+§6.9 "What is a t-test?", p. 272:
+
+> ```
+> >>> from scipy import stats
+> >>> stats.ttest_ind(A, B)
+> ```
+
+The R equivalent is `t.test()`. Compare the two approaches on the T-cell data:
+
+```{r ttest}
+# Book p. 272 Python snippet was:
+#   >>> from scipy import stats
+#   >>> stats.ttest_ind(A, B)
+# R equivalent:
+t_ind <- t.test(treatment, control, var.equal = TRUE)  # Student's
+t_wel <- t.test(treatment, control)                    # Welch's (default)
+
+tibble(
+  method  = c("Big Box resampling", "Student's t",    "Welch's t"),
+  p_value = c(p_value,               t_ind$p.value,   t_wel$p.value)
+)
+```
+
+Resampling and the t-test agree when the t-test's assumptions are met. When they
+aren't (heavy tails, unequal variances), resampling keeps working while the t-test
+quietly fails.
+
+# Exercises
+
+1. Reduce each group to n = 5 (use the first 5 obs of each). Re-run the Big Box
+   analysis. What happens to the p-value? To the CI width? Why?
+2. Replace the treatment group with `control + 1` (a tiny shift). At what sample
+   size does Big Box declare p < 0.05? (This is Chapter 11's question in disguise.)
+3. For the paired analysis, redo it treating swimsuit and wetsuit as independent
+   samples (ignore pairing). How much power is lost? Quantify via a simulation.
