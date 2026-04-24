@@ -1,6 +1,6 @@
 ---
 title: "Chapter 11 — Power (R companion)"
-subtitle: "R/tidyverse translation of *Understanding Data*"
+subtitle: "R/tidyverse translation of *Understanding Data by Alan Garfinkel & Yina Guo*"
 author: "Course notes"
 date: "`r Sys.Date()`"
 output:
@@ -21,22 +21,21 @@ set.seed(42)
 # Orientation
 
 Chapter 11 (book pp. 557–594) defines **statistical power** — the probability
-of detecting a real effect of a given size. The book contains **no Python code
-listings** in this chapter. Most underpowered studies don't find what they
+of detecting a real effect of a given size. Most underpowered studies don't find what they
 should, and among underpowered studies that *do* find something, the effect
 is usually an exaggeration. This companion computes power by simulation
-(faithful to the book) and then via formulas.
+(faithful to the book) and then via standard formulas.
 
-# §11.1 — Two kinds of errors  *(book §11.1 "The two types of errors", p. 559)*
+## §11.1 — Two kinds of errors *(book §11.1 “The two types of errors”, p. 559)*
 
-| Truth ↓ \ Decision → | Keep H₀ | Reject H₀          |
-|----------------------|---------|--------------------|
-| H₀ true              | ✓       | **Type I** (α)     |
-| H₀ false             | **Type II** (β) | ✓ (power = 1 − β)   |
+| Truth  | If you Keep $H_0$ | If you Reject $H_0$ |
+|:--|:--:|:--:|
+| $H_0$ true  | $\checkmark$ | **Type I** ($\alpha$) |
+| $H_0$ false | **Type II** ($\beta$) | $\checkmark$ (power $= 1-\beta$) |
 
-- **α (Type I rate)** — false alarm. Set by the analyst (commonly 0.05).
-- **β (Type II rate)** — missed real effect. We want this *small*.
-- **Power** = 1 − β = P(reject H₀ | H₀ is false).
+- **$\alpha$ (Type I rate)** — false alarm. Set by the analyst (commonly 0.05).
+- **$\beta$ (Type II rate)** — missed real effect. We want this small.
+- **Power** $= 1-\beta = P(\text{reject } H_0 \mid H_0 \text{ is false})$.
 
 # §11.2 — Power by simulation  *(book §11.2 "How to calculate the power of a study?", p. 565)*
 
@@ -101,7 +100,7 @@ Three lessons:
 
 # §11.3 — A low-power study wrongly concluding "no effect"  *(book §11.3 "Was Bendectin use by pregnant women associated with an increased risk of birth defects?", p. 577)*
 
-The chapter uses the **Bendectin** controversy: an underpowered study found
+The chapter uses as an example the **Bendectin** controversy: an underpowered study found
 no increase in birth defects and was read as exonerating the drug. Let's
 simulate what that looks like.
 
