@@ -20,10 +20,10 @@ set.seed(1)
 
 # Orientation
 
-Chapter 1 (book pp. 17–22) is a narrative chapter — it has no code. It argues that a large fraction of
-the published scientific literature is unreliable, and blames weak statistical practice
+Chapter 1 (book pp. 17–22) is a narrative chapter — it has no code. It shows that a large fraction of
+the published scientific literature is unreliable, due to weak statistical practices
 (especially rigid reliance on `p < 0.05`, §1.3). Because the chapter contains no Python,
-this R companion illustrates the **diagnostic symptoms** the author describes so that
+this R companion illustrates the **diagnostic symptoms** the authors describes so that
 you can see them in real numbers before we learn the cures in later chapters.
 
 Three symptoms are worth simulating here:
@@ -62,7 +62,7 @@ mean(results$p_value < 0.05)   # should be ≈ 0.05
 ```
 
 That ≈ 5 % rate is *by construction* — α = 0.05 means "accept a 5 % false-alarm rate".
-Across thousands of tests in a literature, that is a lot of spurious findings.
+Across thousands of tests in the literature, that is a lot of spurious findings.
 
 ```{r p-histogram}
 ggplot(results, aes(p_value)) +
