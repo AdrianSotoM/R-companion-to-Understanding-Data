@@ -21,9 +21,9 @@ set.seed(42)
 # Orientation
 
 Chapter 4 (book pp. 153–186) defines the confidence interval by **resampling**
-(the bootstrap), not by formula. That's pedagogically beautiful: every step is
+(the bootstrap), not by formula. In this way, every step is
 transparent. The book contains **no Python code listings** in this chapter.
-We translate the chapter's "10,000 (virtual) friends" analogy (§4.2, p. 162) into
+In here, we translate the chapter's "10,000 (virtual) friends" analogy (§4.2, p. 162) into
 a for-loop first, then show the idiomatic one-liner.
 
 # §4.1 — The idea  *(book p. 153)*
@@ -176,9 +176,6 @@ bootstrap does not.
 
 **Interpret, correctly:** "If we repeated this experiment many times, 95 % of
 such intervals would contain the true population mean."
-
-**Do NOT say:** "There is a 95 % probability the true mean is between
-10.74 and 11.30." That's a Bayesian statement (see Chapter 12).
 
 # Exercises
 
