@@ -60,7 +60,7 @@ prop.table(table(rolls))   # empirical probabilities converge to 1/6
 
 ## The setup
 
-Suppose we observe 7 heads out of 10 tosses of a coin. Is it unfair?
+Suppose we observe 7 heads out of 10 tosses of a coin. Is it "loaded"?
 
 ```{r nhst-setup}
 observed_heads <- 7
