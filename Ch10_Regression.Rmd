@@ -1,6 +1,6 @@
 ---
 title: "Chapter 10 — Regression (R companion)"
-subtitle: "R/tidyverse translation of *Understanding Data*"
+subtitle: "R/tidyverse translation of *Understanding Data by Alan Garfinkel & Yina Guo*"
 author: "Course notes"
 date: "`r Sys.Date()`"
 output:
@@ -250,16 +250,10 @@ ggplot(fires, aes(year, acres)) +
 The spline reveals whether the trend is linear, accelerating, or decelerating —
 information the linear fit hides.
 
-# §10.5 — The ugly history  *(book §10.5 "The ugly history of correlation, regression, p-values and NHST", p. 549)*
-
-A narrative section on Galton, Pearson, Fisher, and the eugenicist origins of
-much of classical statistics. No code — but a reason, the chapter argues, to
-be suspicious of "p < 0.05 as gospel".
-
 # Exercises
 
 1. Add 5 outliers at large `x`, small `y` to the linear dataset. Re-fit OLS,
-   L1, and orthogonal. Which methods move the most? Which reflect the "honest"
+   L1, and orthogonal. Which methods move the most? Which reflects the "honest"
    relationship?
 2. For the logistic fit, compute the `x` at which P(y = 1) = 0.5. (Hint: set
    β₀ + β₁x = 0.) Add a vertical line at that `x` to the plot.
