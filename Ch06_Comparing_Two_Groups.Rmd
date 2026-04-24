@@ -23,7 +23,7 @@ set.seed(42)
 
 Chapter 6 (book pp. 203–284) is the workhorse. It compares two groups using
 **simulation-based hypothesis tests** (Big Box and Re-centered Two-Box) and
-then reveals that the classical t-test is a special case of these. The book
+then reveals how and why the classical t-test is a special case of these. The book
 contains **one explicit Python snippet** in this chapter (§6.9 "What is a
 t-test?", p. 272, reproduced in-place below). This companion implements both
 resampling procedures from scratch.
@@ -244,9 +244,9 @@ quantile(boot_ratios, c(0.025, 0.975))
 # §6.9 — The t-test as a special case  *(book p. 269)*
 
 The chapter reveals: **Student's t-test is the Big Box's formula-based
-approximation** when data are Normal and variances are equal.
+approximation** when data are Normal, and variances are equal.
 
-The book's only Python snippet in this chapter appears here. From book
+The Python snippet in this chapter appears here. From book
 §6.9 "What is a t-test?", p. 272:
 
 > ```
