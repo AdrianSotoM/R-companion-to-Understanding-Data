@@ -1,6 +1,6 @@
 ---
 title: "Chapter 9 — Bivariate Data: Correlation and Beyond (R companion)"
-subtitle: "R/tidyverse translation of *Understanding Data*"
+subtitle: "R/tidyverse translation of *Understanding Data by Alan Garfinkel & Yina Guo*"
 author: "Course notes"
 date: "`r Sys.Date()`"
 output:
@@ -22,8 +22,8 @@ set.seed(42)
 
 Chapter 9 (book pp. 448–508) is about measuring **association** between two
 variables: Pearson's r, Spearman's ρ, and mutual information. The book contains
-**no Python code listings** in this chapter. It repeatedly warns: always
-**look at the scatterplot first**.
+**no Python code listings** in this chapter. However, visual examples of the
+concepts in this chapter are provided below.
 
 # §9.1 — Scatterplots come first  *(book §9.1 "Bivariate data: two measurements", p. 448)*
 
@@ -174,7 +174,7 @@ is preserved. Independently resampling x and y would break the correlation.
 
 # §9.6 — The interpretation of correlation  *(book p. 488)*
 
-The chapter's crucial point: **correlation does not imply causation**. Classic
+Remember: **correlation does not imply causation**. Classic
 confounders generate spurious correlations.
 
 ```{r confounder}
