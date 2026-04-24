@@ -1,7 +1,7 @@
 ---
 title: "Chapter 9 — Bivariate Data: Correlation and Beyond (R companion)"
-subtitle: "R/tidyverse translation of *Understanding Data by Alan Garfinkel & Yina Guo*"
-author: "Course notes"
+subtitle: "R/tidyverse translation of *Understanding Data by Alan Garfinkel and Yina Guo*"
+author: "Adrian Soto-Mota, MD, PhD, FACP."
 date: "`r Sys.Date()`"
 output:
   html_document:
