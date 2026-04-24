@@ -1,6 +1,6 @@
 ---
 title: "Chapter 6 — Comparing Two Groups (R companion)"
-subtitle: "R/tidyverse translation of *Understanding Data*"
+subtitle: "R/tidyverse translation of *Understanding Data by Alan Garfinkel & Yina Guo*"
 author: "Course notes"
 date: "`r Sys.Date()`"
 output:
