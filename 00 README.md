@@ -1,9 +1,8 @@
 # *Understanding Data* — R companion (student setup)
 
-This folder contains twelve `.Rmd` files, one per chapter of *Understanding
-Data*. Each file walks through the chapter's key algorithms in R — mostly
-using simulation and resampling, following the book's pedagogical style —
-and ends with three exercises.
+This repository contains twelve `.Rmd` files, one per chapter of *Understanding
+Data* by Alan Garfinkel and Yina Guo. Each file walks through the chapter's key algorithms in R (mostly
+using simulation and resampling), following the book's pedagogical style using R code (instead of Python).
 
 ## 1. Prerequisites
 
