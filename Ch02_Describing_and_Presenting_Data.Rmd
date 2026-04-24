@@ -128,8 +128,11 @@ manual_mean   <- sum(x) / length(x)
 # Median: middle of the sorted sample (or mean of two middles)
 sorted_x <- sort(x)
 m <- length(sorted_x)
-manual_median <- if (m %% 2 == 1) sorted_x[(m + 1) / 2]
-                 else mean(sorted_x[c(m/2, m/2 + 1)])
+manual_median <- if (m %% 2 == 1) {
+  sorted_x[(m + 1) / 2]
+} else {
+  mean(sorted_x[c(m / 2, m / 2 + 1)])
+}
 
 # Mode: the "most common" value — for continuous data, peak of the KDE
 d <- density(x)
@@ -176,8 +179,8 @@ diff(range(x))
 
 # §2.5 — Presentation: show the data  *(book p. 84)*
 
-The chapter is scathing about bar graphs with error bars ("dynamite plunger plots",
-book §2.5, p. 93) because they hide the distribution. Compare:
+The chapter shows how bar graphs with error bars ("dynamite plunger plots",
+are a dab idea §2.5, p. 93) as they hide the distribution. Compare:
 
 ```{r bar-vs-points, fig.width=9, fig.height=4}
 summary_df <- df |>
